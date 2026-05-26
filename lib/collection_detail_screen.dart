@@ -103,7 +103,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   void dispose() { _tabCtrl.dispose(); _timer?.cancel(); super.dispose(); }
 
   Future<void> _syncAndLoad() async {
-    // Sync timer depuis Supabase au démarrage
     await PackSystem.syncFromSupabase(widget.collection.id);
     _startTimer();
     await _loadCards();

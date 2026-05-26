@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -280,7 +279,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                       onPressed: () {
                         setState(() {
                           zone.text = controller.text;
-                          zone.color = selectedColor.value;
+                          zone.color = selectedColor.toARGB32();
                           zone.fontFamily =
                               selectedFont == 'Default'
                                   ? null
@@ -430,7 +429,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ],
                       ).createShader(bounds),
                   blendMode: BlendMode.srcOver,
-                  child: Container(color: Colors.white.withOpacity(0.2)),
+                  child: Container(color: Colors.white.withValues(alpha:0.2)),
                 ),
               ),
               _buildSparkles(),
@@ -744,6 +743,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           ),
           TextButton(
             onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               final card = SavedCard(
                 id: DateTime.now().millisecondsSinceEpoch.toString(),
                 name: _nameController.text,
@@ -762,15 +762,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 textZones: _textZones,
               );
               await CardStorage.addCard(card);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ Carte sauvegardée !'),
-                    backgroundColor: Color(0xFF4CAF50),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
+              if (!mounted) return;
+              messenger.showSnackBar(
+                const SnackBar(
+                  content: Text('✅ Carte sauvegardée !'),
+                  backgroundColor: Color(0xFF4CAF50),
+                  duration: Duration(seconds: 2),
+                ),
+              );
             },
             child: const Text(
               'Sauvegarder',

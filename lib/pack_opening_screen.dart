@@ -180,7 +180,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     _shakeCtrl.dispose();
     _tearCtrl.dispose();
     _flyCtrl.dispose();
-    for (final c in _flipCtrls) c.dispose();
+    for (final c in _flipCtrls) { c.dispose(); }
     super.dispose();
   }
 
@@ -274,7 +274,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       gradient: RadialGradient(
         radius: 1.5,
         colors: [
-          widget.packColor.withOpacity(
+          widget.packColor.withValues(alpha:
             _phase == _Phase.revealing ? 0.50 : 0.18,
           ),
           Colors.black,
@@ -446,7 +446,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
           Text(
             'Appuie pour ouvrir',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.65),
+              color: Colors.white.withValues(alpha:0.65),
               fontSize: 16,
               letterSpacing: 1.3,
               fontWeight: FontWeight.w300,
@@ -501,7 +501,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                 Text(
                   'Appuie à nouveau sur une carte pour l\'inspecter',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.38),
+                    color: Colors.white.withValues(alpha:0.38),
                     fontSize: 12,
                   ),
                 ),
@@ -635,7 +635,7 @@ class _PackVisual extends StatelessWidget {
                   borderRadius: BorderRadius.circular(kRadius),
                   boxShadow: [
                     BoxShadow(
-                      color: packColor.withOpacity(glowIntensity),
+                      color: packColor.withValues(alpha:glowIntensity),
                       blurRadius: 60,
                       spreadRadius: 20,
                     ),
@@ -677,7 +677,7 @@ class _PackVisual extends StatelessWidget {
           Colors.black87,
         ],
       ),
-      border: Border.all(color: Colors.white.withOpacity(0.13), width: 1.5),
+      border: Border.all(color: Colors.white.withValues(alpha:0.13), width: 1.5),
     ),
     child: ClipRRect(
       borderRadius: const BorderRadius.vertical(
@@ -701,7 +701,7 @@ class _PackVisual extends StatelessWidget {
         end: Alignment.bottomCenter,
         colors: [Color.lerp(packColor, Colors.white, 0.18)!, packColor],
       ),
-      border: Border.all(color: Colors.white.withOpacity(0.15), width: 1.5),
+      border: Border.all(color: Colors.white.withValues(alpha:0.15), width: 1.5),
     ),
   );
 
@@ -712,11 +712,11 @@ class _PackVisual extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withOpacity(0.07),
+            Colors.white.withValues(alpha:0.07),
             Colors.transparent,
-            Colors.white.withOpacity(0.04),
+            Colors.white.withValues(alpha:0.04),
             Colors.transparent,
-            Colors.white.withOpacity(0.08),
+            Colors.white.withValues(alpha:0.08),
           ],
           stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
         ),
@@ -733,9 +733,9 @@ class _PackVisual extends StatelessWidget {
           height: 66,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.07),
+            color: Colors.white.withValues(alpha:0.07),
             border: Border.all(
-              color: Colors.white.withOpacity(0.22),
+              color: Colors.white.withValues(alpha:0.22),
               width: 1.5,
             ),
           ),
@@ -757,13 +757,13 @@ class _PackVisual extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withOpacity(0.28)),
+            border: Border.all(color: Colors.white.withValues(alpha:0.28)),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
             'BOOSTER PACK',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.55),
+              color: Colors.white.withValues(alpha:0.55),
               fontSize: 9,
               letterSpacing: 2.8,
               fontWeight: FontWeight.w600,
@@ -785,7 +785,7 @@ class _PackVisual extends StatelessWidget {
           child: Container(
             height: 1.5,
             color:
-                i.isEven ? Colors.white.withOpacity(0.28) : Colors.transparent,
+                i.isEven ? Colors.white.withValues(alpha:0.28) : Colors.transparent,
           ),
         ),
       ),
@@ -810,12 +810,12 @@ class _CardBack extends StatelessWidget {
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [packColor.withOpacity(0.9), Colors.black87],
+        colors: [packColor.withValues(alpha:0.9), Colors.black87],
       ),
-      border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+      border: Border.all(color: Colors.white.withValues(alpha:0.2), width: 1.5),
       boxShadow: [
         BoxShadow(
-          color: packColor.withOpacity(0.4),
+          color: packColor.withValues(alpha:0.4),
           blurRadius: 14,
           spreadRadius: 1,
         ),
@@ -824,7 +824,7 @@ class _CardBack extends StatelessWidget {
     child: Center(
       child: Icon(
         Icons.auto_awesome,
-        color: Colors.white.withOpacity(0.35),
+        color: Colors.white.withValues(alpha:0.35),
         size: 30,
       ),
     ),
@@ -968,23 +968,23 @@ class _FlippableCardState extends State<_FlippableCard>
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
+                    color: Colors.white.withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white.withOpacity(0.2)),
+                    border: Border.all(color: Colors.white.withValues(alpha:0.2)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         Icons.search,
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha:0.6),
                         size: 10,
                       ),
                       const SizedBox(width: 3),
                       Text(
                         'Inspecter',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.6),
+                          color: Colors.white.withValues(alpha:0.6),
                           fontSize: 8,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1012,7 +1012,7 @@ class _FlippableCardState extends State<_FlippableCard>
       border: Border.all(color: Colors.white24, width: 1.5),
       boxShadow: [
         BoxShadow(
-          color: widget.packColor.withOpacity(0.35),
+          color: widget.packColor.withValues(alpha:0.35),
           blurRadius: 10,
           spreadRadius: 2,
         ),
@@ -1023,14 +1023,14 @@ class _FlippableCardState extends State<_FlippableCard>
       children: [
         Icon(
           Icons.auto_awesome,
-          color: Colors.white.withOpacity(0.45),
+          color: Colors.white.withValues(alpha:0.45),
           size: 32,
         ),
         const SizedBox(height: 8),
         Text(
           '?',
           style: TextStyle(
-            color: Colors.white.withOpacity(0.5),
+            color: Colors.white.withValues(alpha:0.5),
             fontSize: 30,
             fontWeight: FontWeight.bold,
           ),
@@ -1056,7 +1056,7 @@ class _FlippableCardState extends State<_FlippableCard>
                   borderRadius: BorderRadius.circular(12 + 30 * v),
                   boxShadow: [
                     BoxShadow(
-                      color: rc.withOpacity((1 - v) * 0.9),
+                      color: rc.withValues(alpha:(1 - v) * 0.9),
                       blurRadius: 40 * v,
                       spreadRadius: 14 * v,
                     ),
@@ -1074,7 +1074,7 @@ class _FlippableCardState extends State<_FlippableCard>
             border: Border.all(color: rc, width: 2),
             boxShadow: [
               BoxShadow(
-                color: rc.withOpacity(0.5),
+                color: rc.withValues(alpha:0.5),
                 blurRadius: 18,
                 spreadRadius: 3,
               ),
@@ -1097,7 +1097,7 @@ class _FlippableCardState extends State<_FlippableCard>
       gradient: LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [rc.withOpacity(0.14), Colors.black54],
+        colors: [rc.withValues(alpha:0.14), Colors.black54],
       ),
     ),
     child:
@@ -1111,7 +1111,7 @@ class _FlippableCardState extends State<_FlippableCard>
   );
 
   Widget _defaultArt(Color rc) => Center(
-    child: Icon(Icons.auto_fix_high, color: rc.withOpacity(0.6), size: 38),
+    child: Icon(Icons.auto_fix_high, color: rc.withValues(alpha:0.6), size: 38),
   );
 
   Widget _infoBar(Color rc) => Container(
@@ -1134,7 +1134,7 @@ class _FlippableCardState extends State<_FlippableCard>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           decoration: BoxDecoration(
-            color: rc.withOpacity(0.15),
+            color: rc.withValues(alpha:0.15),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Text(
@@ -1210,7 +1210,7 @@ class SavedCardFrontWidget extends StatelessWidget {
         border: Border.all(color: rc, width: 3),
         boxShadow: [
           BoxShadow(
-            color: rc.withOpacity(0.6),
+            color: rc.withValues(alpha:0.6),
             blurRadius: 28,
             spreadRadius: 4,
           ),
@@ -1226,7 +1226,7 @@ class SavedCardFrontWidget extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [rc.withOpacity(0.18), const Color(0xFF0D0D1C)],
+                    colors: [rc.withValues(alpha:0.18), const Color(0xFF0D0D1C)],
                   ),
                 ),
               ),
@@ -1261,7 +1261,7 @@ class SavedCardFrontWidget extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.92),
+                      Colors.black.withValues(alpha:0.92),
                     ],
                   ),
                 ),
@@ -1286,9 +1286,9 @@ class SavedCardFrontWidget extends StatelessWidget {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: rc.withOpacity(0.2),
+                            color: rc.withValues(alpha:0.2),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: rc.withOpacity(0.5)),
+                            border: Border.all(color: rc.withValues(alpha:0.5)),
                           ),
                           child: Text(
                             _rarityName.toUpperCase(),
@@ -1308,16 +1308,16 @@ class SavedCardFrontWidget extends StatelessWidget {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.08),
+                              color: Colors.white.withValues(alpha:0.08),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha:0.2),
                               ),
                             ),
                             child: Text(
                               _effectName(card.effect),
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.7),
+                                color: Colors.white.withValues(alpha:0.7),
                                 fontSize: 9,
                                 letterSpacing: 0.5,
                               ),
@@ -1355,11 +1355,11 @@ class SavedCardFrontWidget extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Colors.white.withOpacity(0.06),
+                        Colors.white.withValues(alpha:0.06),
                         Colors.transparent,
-                        Colors.white.withOpacity(0.03),
+                        Colors.white.withValues(alpha:0.03),
                         Colors.transparent,
-                        Colors.white.withOpacity(0.07),
+                        Colors.white.withValues(alpha:0.07),
                       ],
                       stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
                     ),
@@ -1408,10 +1408,10 @@ class SavedCardBackWidget extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: bg,
-        border: Border.all(color: Colors.white.withOpacity(0.15), width: 2),
+        border: Border.all(color: Colors.white.withValues(alpha:0.15), width: 2),
         boxShadow: [
           BoxShadow(
-            color: bg.withOpacity(0.5),
+            color: bg.withValues(alpha:0.5),
             blurRadius: 24,
             spreadRadius: 2,
           ),
@@ -1437,11 +1437,11 @@ class SavedCardBackWidget extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Colors.white.withOpacity(0.08),
+                        Colors.white.withValues(alpha:0.08),
                         Colors.transparent,
-                        Colors.white.withOpacity(0.04),
+                        Colors.white.withValues(alpha:0.04),
                         Colors.transparent,
-                        Colors.white.withOpacity(0.09),
+                        Colors.white.withValues(alpha:0.09),
                       ],
                       stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
                     ),
@@ -1453,7 +1453,7 @@ class SavedCardBackWidget extends StatelessWidget {
               Center(
                 child: Icon(
                   Icons.auto_awesome,
-                  color: Colors.white.withOpacity(0.25),
+                  color: Colors.white.withValues(alpha:0.25),
                   size: 72,
                 ),
               ),

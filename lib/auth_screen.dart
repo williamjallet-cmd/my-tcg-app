@@ -177,7 +177,7 @@ class _AuthScreenState extends State<AuthScreen>
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF7C3AED).withOpacity(0.5),
+                      color: const Color(0xFF7C3AED).withValues(alpha:0.5),
                       blurRadius: 24,
                       spreadRadius: 4,
                     ),
@@ -203,7 +203,7 @@ class _AuthScreenState extends State<AuthScreen>
               Text(
                 'Ta collection de cartes',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.4),
+                  color: Colors.white.withValues(alpha:0.4),
                   fontSize: 14,
                 ),
               ),
@@ -247,20 +247,20 @@ class _AuthScreenState extends State<AuthScreen>
               Row(
                 children: [
                   Expanded(
-                    child: Divider(color: Colors.white.withOpacity(0.1)),
+                    child: Divider(color: Colors.white.withValues(alpha:0.1)),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Text(
                       'ou',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.3),
+                        color: Colors.white.withValues(alpha:0.3),
                         fontSize: 13,
                       ),
                     ),
                   ),
                   Expanded(
-                    child: Divider(color: Colors.white.withOpacity(0.1)),
+                    child: Divider(color: Colors.white.withValues(alpha:0.1)),
                   ),
                 ],
               ),
@@ -282,7 +282,7 @@ class _AuthScreenState extends State<AuthScreen>
                       style: TextStyle(color: Colors.white, fontSize: 15),
                     ),
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                      side: BorderSide(color: Colors.white.withValues(alpha:0.2)),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -323,7 +323,7 @@ class _AuthScreenState extends State<AuthScreen>
           child: Text(
             'Mot de passe oublié ?',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
+              color: Colors.white.withValues(alpha:0.45),
               fontSize: 12,
             ),
           ),
@@ -339,14 +339,14 @@ class _AuthScreenState extends State<AuthScreen>
           decoration: BoxDecoration(
             color:
                 _rememberMe
-                    ? const Color(0xFF7C3AED).withOpacity(0.12)
-                    : Colors.white.withOpacity(0.04),
+                    ? const Color(0xFF7C3AED).withValues(alpha:0.12)
+                    : Colors.white.withValues(alpha:0.04),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color:
                   _rememberMe
-                      ? const Color(0xFF7C3AED).withOpacity(0.5)
-                      : Colors.white.withOpacity(0.08),
+                      ? const Color(0xFF7C3AED).withValues(alpha:0.5)
+                      : Colors.white.withValues(alpha:0.08),
             ),
           ),
           child: Row(
@@ -363,11 +363,11 @@ class _AuthScreenState extends State<AuthScreen>
                             colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
                           )
                           : null,
-                  color: _rememberMe ? null : Colors.white.withOpacity(0.08),
+                  color: _rememberMe ? null : Colors.white.withValues(alpha:0.08),
                   border:
                       _rememberMe
                           ? null
-                          : Border.all(color: Colors.white.withOpacity(0.2)),
+                          : Border.all(color: Colors.white.withValues(alpha:0.2)),
                 ),
                 child:
                     _rememberMe
@@ -394,7 +394,7 @@ class _AuthScreenState extends State<AuthScreen>
                     Text(
                       'Rester connecté à ce compte',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.4),
+                        color: Colors.white.withValues(alpha:0.4),
                         fontSize: 11,
                       ),
                     ),
@@ -406,7 +406,7 @@ class _AuthScreenState extends State<AuthScreen>
                 color:
                     _rememberMe
                         ? const Color(0xFFB06EF3)
-                        : Colors.white.withOpacity(0.3),
+                        : Colors.white.withValues(alpha:0.3),
                 size: 18,
               ),
             ],
@@ -459,7 +459,7 @@ class _AuthScreenState extends State<AuthScreen>
     style: const TextStyle(color: Colors.white),
     decoration: InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+      hintStyle: TextStyle(color: Colors.white.withValues(alpha:0.3)),
       prefixIcon: Icon(icon, color: Colors.white38, size: 20),
       suffixIcon:
           toggleObscure != null
@@ -495,7 +495,7 @@ class _AuthScreenState extends State<AuthScreen>
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF7C3AED).withOpacity(0.4),
+            color: const Color(0xFF7C3AED).withValues(alpha:0.4),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),

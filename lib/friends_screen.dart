@@ -41,13 +41,14 @@ class _FriendsScreenState extends State<FriendsScreen>
         ProfileService.instance.getPendingRequests(),
         ProfileService.instance.getSentRequests(),
       ]);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _friends = results[0];
           _pending = results[1];
           _sent = results[2];
           _loading = false;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -436,6 +437,7 @@ class _SearchSheetState extends State<_SearchSheet> {
   Future<void> _addFriend(UserProfile user) async {
     try {
       await ProfileService.instance.sendFriendRequest(user.id);
+      if (!mounted) return;
       setState(() => _sent.add(user.id));
       widget.onAdded();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -445,6 +447,7 @@ class _SearchSheetState extends State<_SearchSheet> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade800),
       );
