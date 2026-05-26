@@ -1,5 +1,5 @@
 ﻿// collection_detail_screen.dart
-// ✦ 3 onglets : Pack · Cartes · Créer (images multiples, zones de texte, drag) ✦
+// FEATURES : drag mobile, panneau couches, inspection 3D cartes collectées
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -80,13 +80,11 @@ String _catKey(String colId) {
 class CollectionDetailScreen extends StatefulWidget {
   final CollectionModel collection;
   final String myUserId;
-
   const CollectionDetailScreen({
     super.key,
     required this.collection,
     required this.myUserId,
   });
-
   @override
   State<CollectionDetailScreen> createState() => _CollectionDetailScreenState();
 }
@@ -97,7 +95,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Duration _remaining = Duration.zero;
   bool _canOpen = false;
   Timer? _timer;
-
   List<SavedCard> _allCards = [];
   List<SavedCard> _obtainedCards = [];
   Set<String> _catalogueIds = {};
@@ -147,15 +144,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     }
   }
 
-  // FIX CARTES : sync depuis Supabase + reconstruction des cartes manquantes localement
   Future<void> _loadCards() async {
     if (mounted) setState(() => _loading = true);
     final prefs = await SharedPreferences.getInstance();
-
-    // 1. Charge les cartes locales
     List<SavedCard> all = await CardStorage.loadCards();
-
-    // 2. Sync cartes obtenues depuis Supabase
     Set<String> obtIds =
         (prefs.getStringList(_obtKey(widget.collection.id)) ?? []).toSet();
     try {
@@ -164,7 +156,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       );
       for (final entry in remoteEntries) {
         obtIds.add(entry.cardId);
-        // Si la carte existe dans Supabase mais pas localement → reconstruction
         if (!all.any((c) => c.id == entry.cardId)) {
           final reconstructed = entry.toSavedCard();
           if (reconstructed != null) {
@@ -173,11 +164,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
           }
         }
       }
-      // Sauvegarde les IDs obtenus en cache local
       await prefs.setStringList(_obtKey(widget.collection.id), obtIds.toList());
     } catch (_) {}
-
-    // 3. Catalogue : Supabase + fallback local
     Set<String> catIds = {};
     try {
       catIds.addAll(
@@ -187,7 +175,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       );
     } catch (_) {}
     catIds.addAll(prefs.getStringList(_catKey(widget.collection.id)) ?? []);
-
     if (mounted) {
       setState(() {
         _allCards = all;
@@ -211,18 +198,16 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     }
     final rng = math.Random();
     final packCards = List.generate(3, (_) => _weightedPick(pool, rng));
-
     await PackSystem.setLastOpenedTime(widget.collection.id);
-
     final prefs = await SharedPreferences.getInstance();
     final key = _obtKey(widget.collection.id);
     final existing = prefs.getStringList(key) ?? [];
-    final updated = {...existing, ...packCards.map((c) => c.id)}.toList();
-    await prefs.setStringList(key, updated);
-
+    await prefs.setStringList(
+      key,
+      {...existing, ...packCards.map((c) => c.id)}.toList(),
+    );
     _startTimer();
     if (!mounted) return;
-
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -582,6 +567,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     ),
   );
 
+  // ── Onglet Cartes — FEATURE 2 : inspection 3D ─────────────────────────────
   Widget _cardsTab() => Column(
     children: [
       Container(
@@ -707,24 +693,243 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   );
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   TUILE CARTE — FEATURE 2 : inspection 3D au tap
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class _CardTile extends StatelessWidget {
+  final SavedCard card;
+  final bool revealed;
+  const _CardTile({required this.card, required this.revealed});
+
+  Color get _rc {
+    switch (card.rarity) {
+      case Rarity.legendary:
+        return const Color(0xFFFFD700);
+      case Rarity.epic:
+        return const Color(0xFF9C27B0);
+      case Rarity.rare:
+        return const Color(0xFF2196F3);
+      case Rarity.uncommon:
+        return const Color(0xFF4CAF50);
+      case Rarity.common:
+        return const Color(0xFF9E9E9E);
+    }
+  }
+
+  String get _rl {
+    switch (card.rarity) {
+      case Rarity.legendary:
+        return 'Légendaire';
+      case Rarity.epic:
+        return 'Épique';
+      case Rarity.rare:
+        return 'Rare';
+      case Rarity.uncommon:
+        return 'Peu commun';
+      case Rarity.common:
+        return 'Commun';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!revealed) return _back();
+    // FEATURE 2 : tap → inspection 3D
+    return GestureDetector(
+      onTap:
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder:
+                  (_) => CardInspectorScreen(
+                    frontCard: SavedCardFrontWidget(
+                      card: card,
+                      width: 300,
+                      height: 420,
+                    ),
+                    backCard: SavedCardBackWidget(
+                      card: card,
+                      width: 300,
+                      height: 420,
+                    ),
+                  ),
+            ),
+          ),
+      child: Stack(
+        children: [
+          _front(),
+          // Badge "inspecter"
+          Positioned(
+            bottom: 4,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.view_in_ar,
+                      color: Colors.white.withValues(alpha: 0.6),
+                      size: 9,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      '3D',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 7,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _front() => Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: _rc, width: 2),
+      color: const Color(0xFF16213E),
+      boxShadow: [BoxShadow(color: _rc.withValues(alpha: 0.3), blurRadius: 6)],
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Stack(
+        children: [
+          if (card.imageBytes != null)
+            Positioned.fill(
+              child: Image.memory(card.imageBytes!, fit: BoxFit.cover),
+            ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.95),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    card.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _rc.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      _rl,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 6,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _back() => Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF1A1A3E), Color(0xFF0D0D1C)],
+      ),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.1),
+        width: 1.5,
+      ),
+    ),
+    child: Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.help_outline_rounded,
+            color: Colors.white.withValues(alpha: 0.15),
+            size: 28,
+          ),
+          Text(
+            '?',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.1),
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   COUCHE IMAGE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 class _ImgLayer {
   Uint8List bytes;
   double x = 0, y = 0, scale = 1.0;
-  bool selected = false;
+  double opacity = 1.0;
   _ImgLayer({required this.bytes});
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   CRÉATEUR DE CARTE — FEATURE 1 : drag mobile + panneau couches
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CardCreator extends StatefulWidget {
   final List<Color> palette;
   final String collectionId;
   final VoidCallback onSaved;
-
   const _CardCreator({
     required this.palette,
     required this.collectionId,
     required this.onSaved,
   });
-
   @override
   State<_CardCreator> createState() => _CardCreatorState();
 }
@@ -739,6 +944,9 @@ class _CardCreatorState extends State<_CardCreator>
   final List<_ImgLayer> _images = [];
   final List<TextZone> _textZones = [];
 
+  // Couche sélectionnée (-1 = aucune, index >= 0 = image, -2 = nom, -3 = rareté)
+  int _selectedLayer = -1;
+
   double _nameX = 8, _nameY = 200;
   double _rarityX = 8, _rarityY = 222;
 
@@ -746,8 +954,20 @@ class _CardCreatorState extends State<_CardCreator>
   int _backColor = 0xFF16213E;
   Uint8List? _backImageBytes;
 
-  late AnimationController _legendaryCtrl;
+  // Personnalisation de la bordure
+  int _borderColorIndex = -1; // -1 = couleur rareté par défaut
+  static const _borderColors = [
+    Colors.white,
+    Color(0xFFFFD700),
+    Color(0xFFFF3333),
+    Color(0xFF33FF99),
+    Color(0xFF3399FF),
+    Color(0xFFFF33CC),
+    Color(0xFF000000),
+    Color(0xFF888888),
+  ];
 
+  late AnimationController _legendaryCtrl;
   static const double _cW = 194, _cH = 284;
 
   final _gradients = [
@@ -768,6 +988,14 @@ class _CardCreatorState extends State<_CardCreator>
     0xFF1B2631,
     0xFF4A235A,
     0xFF1A5276,
+  ];
+
+  // Polices disponibles pour les textes
+  static const _fontFamilies = [
+    (null, 'Défaut'),
+    ('serif', 'Serif'),
+    ('monospace', 'Mono'),
+    ('cursive', 'Cursif'),
   ];
 
   @override
@@ -816,6 +1044,9 @@ class _CardCreatorState extends State<_CardCreator>
     }
   }
 
+  Color get _currentBorderColor =>
+      _borderColorIndex >= 0 ? _borderColors[_borderColorIndex] : _rc(_rarity);
+
   Future<void> _addImage({bool isBack = false}) async {
     final file = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -829,6 +1060,8 @@ class _CardCreatorState extends State<_CardCreator>
         _backImageBytes = bytes;
       } else {
         _images.add(_ImgLayer(bytes: bytes));
+        _selectedLayer =
+            _images.length - 1; // auto-sélectionne la nouvelle couche
       }
     });
   }
@@ -850,6 +1083,7 @@ class _CardCreatorState extends State<_CardCreator>
     final ctrl = TextEditingController(text: zone.text);
     Color selColor = Color(zone.color);
     double fontSize = zone.fontSize;
+    String? fontFamily = zone.fontFamily;
 
     showDialog(
       context: context,
@@ -894,6 +1128,60 @@ class _CardCreatorState extends State<_CardCreator>
                           },
                         ),
                         const SizedBox(height: 8),
+                        // Sélecteur de police
+                        const Text(
+                          'Police',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children:
+                              _fontFamilies.map((f) {
+                                final sel = fontFamily == f.$1;
+                                return GestureDetector(
+                                  onTap: () {
+                                    setD(() => fontFamily = f.$1);
+                                    setState(() => zone.fontFamily = f.$1);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          sel
+                                              ? const Color(
+                                                0xFF7C3AED,
+                                              ).withValues(alpha: 0.3)
+                                              : Colors.white.withValues(
+                                                alpha: 0.06,
+                                              ),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color:
+                                            sel
+                                                ? const Color(0xFF7C3AED)
+                                                : Colors.white.withValues(
+                                                  alpha: 0.1,
+                                                ),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      f.$2,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontFamily: f.$1,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                        ),
+                        const SizedBox(height: 12),
                         const Text(
                           'Couleur',
                           style: TextStyle(color: Colors.white70, fontSize: 13),
@@ -976,8 +1264,162 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
+  // ── Panneau couches ────────────────────────────────────────────────────────
+  Widget _buildLayerPanel() {
+    if (_images.isEmpty && _textZones.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Text(
+          'Ajoute des photos ou du texte pour voir les couches ici',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.25),
+            fontSize: 11,
+          ),
+        ),
+      );
+    }
+    return Container(
+      height: 52,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          // Couches Nom et Rareté
+          _layerChip(
+            icon: const Icon(
+              Icons.badge_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
+            label: 'Nom',
+            selected: _selectedLayer == -2,
+            onTap:
+                () => setState(
+                  () => _selectedLayer = _selectedLayer == -2 ? -1 : -2,
+                ),
+            onDelete: null,
+          ),
+          _layerChip(
+            icon: const Icon(
+              Icons.label_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
+            label: 'Rareté',
+            selected: _selectedLayer == -3,
+            onTap:
+                () => setState(
+                  () => _selectedLayer = _selectedLayer == -3 ? -1 : -3,
+                ),
+            onDelete: null,
+          ),
+          // Couches images
+          for (var i = 0; i < _images.length; i++)
+            _layerChip(
+              icon: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.memory(
+                  _images[i].bytes,
+                  width: 24,
+                  height: 24,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              label: 'Photo ${i + 1}',
+              selected: _selectedLayer == i,
+              onTap:
+                  () => setState(
+                    () => _selectedLayer = _selectedLayer == i ? -1 : i,
+                  ),
+              onDelete:
+                  () => setState(() {
+                    _images.removeAt(i);
+                    _selectedLayer = -1;
+                  }),
+            ),
+          // Couches textes
+          for (var i = 0; i < _textZones.length; i++)
+            _layerChip(
+              icon: const Icon(
+                Icons.text_fields_rounded,
+                color: Colors.white,
+                size: 14,
+              ),
+              label: 'Texte ${i + 1}',
+              selected: false,
+              onTap: () => _editText(i),
+              onDelete: () => setState(() => _textZones.removeAt(i)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _layerChip({
+    required Widget icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    required VoidCallback? onDelete,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: EdgeInsets.only(
+          left: 8,
+          right: onDelete != null ? 6 : 10,
+          top: 6,
+          bottom: 6,
+        ),
+        decoration: BoxDecoration(
+          color:
+              selected
+                  ? const Color(0xFF7C3AED).withValues(alpha: 0.25)
+                  : Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color:
+                selected
+                    ? const Color(0xFF7C3AED)
+                    : Colors.white.withValues(alpha: 0.15),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (onDelete != null) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onDelete,
+                child: Icon(
+                  Icons.close_rounded,
+                  color: Colors.white.withValues(alpha: 0.45),
+                  size: 13,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Canvas carte (drag mobile fix : en dehors du scroll) ──────────────────
   Widget _buildFront() {
-    final rc = _rc(_rarity);
+    final rc = _currentBorderColor;
 
     Widget inner = SizedBox(
       width: _cW,
@@ -1001,54 +1443,59 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
           child: Stack(
             children: [
+              // Images
               ..._images.asMap().entries.map((e) {
                 final i = e.key;
                 final layer = e.value;
+                final isSelected = _selectedLayer == i;
                 return Positioned(
                   left: layer.x,
                   top: layer.y,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap:
+                        () => setState(
+                          () => _selectedLayer = isSelected ? -1 : i,
+                        ),
                     onScaleUpdate:
                         (d) => setState(() {
-                          layer.x += d.focalPointDelta.dx;
-                          layer.y += d.focalPointDelta.dy;
-                          layer.scale = (layer.scale * d.scale).clamp(0.1, 6.0);
-                        }),
-                    onTap:
-                        () => setState(() {
-                          for (var l in _images) {
-                            l.selected = false;
-                          }
-                          layer.selected = !layer.selected;
+                          layer.x = (layer.x + d.focalPointDelta.dx).clamp(
+                            -_cW,
+                            _cW * 2,
+                          );
+                          layer.y = (layer.y + d.focalPointDelta.dy).clamp(
+                            -_cH,
+                            _cH * 2,
+                          );
+                          if (d.scale != 1.0)
+                            layer.scale = (layer.scale * d.scale).clamp(
+                              0.1,
+                              6.0,
+                            );
                         }),
                     child: Stack(
                       children: [
-                        Transform.scale(
-                          scale: layer.scale,
-                          alignment: Alignment.topLeft,
-                          child: Image.memory(
-                            layer.bytes,
-                            width: _cW,
-                            fit: BoxFit.fitWidth,
+                        Opacity(
+                          opacity: layer.opacity,
+                          child: Transform.scale(
+                            scale: layer.scale,
+                            alignment: Alignment.topLeft,
+                            child: Image.memory(
+                              layer.bytes,
+                              width: _cW,
+                              fit: BoxFit.fitWidth,
+                            ),
                           ),
                         ),
-                        if (layer.selected)
-                          Positioned(
-                            top: 2,
-                            right: 2,
-                            child: GestureDetector(
-                              onTap: () => setState(() => _images.removeAt(i)),
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
+                        if (isSelected)
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: const Color(0xFF7C3AED),
+                                  width: 2,
                                 ),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 12,
-                                ),
+                                borderRadius: BorderRadius.circular(4),
                               ),
                             ),
                           ),
@@ -1057,6 +1504,8 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                 );
               }),
+
+              // Textes
               ..._textZones.asMap().entries.map((e) {
                 final i = e.key;
                 final zone = e.value;
@@ -1064,6 +1513,7 @@ class _CardCreatorState extends State<_CardCreator>
                   left: zone.x,
                   top: zone.y,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => _editText(i),
                     onPanUpdate:
                         (d) => setState(() {
@@ -1091,6 +1541,8 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                 );
               }),
+
+              // Dégradé bas
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -1109,10 +1561,17 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                 ),
               ),
+
+              // Nom (draggable — FIX MOBILE)
               Positioned(
                 left: _nameX,
                 top: _nameY,
                 child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap:
+                      () => setState(
+                        () => _selectedLayer = _selectedLayer == -2 ? -1 : -2,
+                      ),
                   onPanUpdate:
                       (d) => setState(() {
                         _nameX = (_nameX + d.delta.dx).clamp(0, _cW - 60);
@@ -1122,6 +1581,16 @@ class _CardCreatorState extends State<_CardCreator>
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      border:
+                          _selectedLayer == -2
+                              ? Border.all(
+                                color: const Color(0xFF7C3AED),
+                                width: 1.5,
+                              )
+                              : null,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       _nameCtrl.text,
@@ -1135,10 +1604,17 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                 ),
               ),
+
+              // Rareté (draggable — FIX MOBILE)
               Positioned(
                 left: _rarityX,
                 top: _rarityY,
                 child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap:
+                      () => setState(
+                        () => _selectedLayer = _selectedLayer == -3 ? -1 : -3,
+                      ),
                   onPanUpdate:
                       (d) => setState(() {
                         _rarityX = (_rarityX + d.delta.dx).clamp(0, _cW - 60);
@@ -1150,8 +1626,12 @@ class _CardCreatorState extends State<_CardCreator>
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: rc,
+                      color: _rc(_rarity),
                       borderRadius: BorderRadius.circular(6),
+                      border:
+                          _selectedLayer == -3
+                              ? Border.all(color: Colors.white, width: 1.5)
+                              : null,
                     ),
                     child: Text(
                       _rn(_rarity),
@@ -1337,8 +1817,9 @@ class _CardCreatorState extends State<_CardCreator>
         _rarity = Rarity.common;
         _selectedGrad = -1;
         _showBack = false;
+        _selectedLayer = -1;
+        _borderColorIndex = -1;
       });
-
       widget.onSaved();
     } catch (e) {
       if (mounted) {
@@ -1354,14 +1835,15 @@ class _CardCreatorState extends State<_CardCreator>
     }
   }
 
+  // ── Build — FEATURE 1 : canvas EN DEHORS du scroll (fix drag mobile) ───────
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      children: [
+        // Toggle recto/verso
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _toggleBtn(
@@ -1377,156 +1859,239 @@ class _CardCreatorState extends State<_CardCreator>
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Center(child: _showBack ? _buildBack() : _buildFront()),
-          const SizedBox(height: 6),
-          Center(
-            child: TextButton.icon(
-              onPressed:
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder:
-                          (_) => CardInspectorScreen(
-                            frontCard: _buildFront(),
-                            backCard: _buildBack(),
-                          ),
-                    ),
-                  ),
-              icon: const Icon(
-                Icons.view_in_ar,
-                color: Colors.white54,
-                size: 16,
-              ),
-              label: const Text(
-                'Inspecter en 3D',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
+        ),
 
-          if (!_showBack) ...[
-            TextField(
-              controller: _nameCtrl,
-              onChanged: (_) => setState(() {}),
-              style: const TextStyle(color: Colors.white),
-              decoration: _deco('Nom de la carte', Icons.badge_rounded),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '💡 Glisse le nom et la rareté directement sur la carte',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.3),
-                fontSize: 11,
-              ),
-            ),
-            const SizedBox(height: 20),
+        // Canvas carte — en dehors du scroll → drag fonctionne sur mobile
+        Center(child: _showBack ? _buildBack() : _buildFront()),
 
-            _secTitle('Rareté'),
-            const SizedBox(height: 10),
-            ...Rarity.values.map((r) {
-              final rc = _rc(r);
-              final sel = _rarity == r;
-              return GestureDetector(
-                onTap: () => setState(() => _rarity = r),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color:
-                        sel
-                            ? rc.withValues(alpha: 0.15)
-                            : Colors.white.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: sel ? rc : Colors.white.withValues(alpha: 0.08),
-                      width: sel ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: rc,
-                          shape: BoxShape.circle,
-                        ),
+        // Bouton 3D inspect
+        TextButton.icon(
+          onPressed:
+              () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      (_) => CardInspectorScreen(
+                        frontCard: _buildFront(),
+                        backCard: _buildBack(),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        _rn(r),
-                        style: TextStyle(
+                ),
+              ),
+          icon: const Icon(Icons.view_in_ar, color: Colors.white38, size: 15),
+          label: const Text(
+            'Inspecter en 3D',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+        ),
+
+        // Panneau couches — aussi en dehors du scroll
+        if (!_showBack) _buildLayerPanel(),
+
+        // Séparateur
+        Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
+
+        // Paramètres scrollables
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!_showBack) ...[
+                  // Nom
+                  TextField(
+                    controller: _nameCtrl,
+                    onChanged: (_) => setState(() {}),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _deco('Nom de la carte', Icons.badge_rounded),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '💡 Glisse le nom et la rareté directement sur la carte',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Rareté
+                  _secTitle('Rareté'),
+                  const SizedBox(height: 8),
+                  ...Rarity.values.map((r) {
+                    final rc = _rc(r);
+                    final sel = _rarity == r;
+                    return GestureDetector(
+                      onTap:
+                          () => setState(() {
+                            _rarity = r;
+                            _borderColorIndex = -1;
+                          }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
                           color:
                               sel
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.6),
-                          fontSize: 13,
-                          fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                                  ? rc.withValues(alpha: 0.15)
+                                  : Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color:
+                                sel ? rc : Colors.white.withValues(alpha: 0.08),
+                            width: sel ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: rc,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              _rn(r),
+                              style: TextStyle(
+                                color:
+                                    sel
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.6),
+                                fontSize: 13,
+                                fontWeight:
+                                    sel ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            const Spacer(),
+                            SizedBox(
+                              width: 80,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: _dropRates[r]! / 100.0,
+                                  backgroundColor: Colors.white.withValues(
+                                    alpha: 0.06,
+                                  ),
+                                  valueColor: AlwaysStoppedAnimation(
+                                    rc.withValues(alpha: 0.7),
+                                  ),
+                                  minHeight: 5,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 32,
+                              child: Text(
+                                _dropLabels[r]!,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  color: rc,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            if (sel) ...[
+                              const SizedBox(width: 8),
+                              Icon(Icons.check_circle, color: rc, size: 16),
+                            ],
+                          ],
                         ),
                       ),
-                      const Spacer(),
-                      SizedBox(
-                        width: 80,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: _dropRates[r]! / 100.0,
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.06,
+                    );
+                  }),
+                  const SizedBox(height: 18),
+
+                  // Ajouter photo
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _addImage(),
+                          icon: const Icon(
+                            Icons.add_photo_alternate_rounded,
+                            color: Colors.white70,
+                          ),
+                          label: Text(
+                            _images.isEmpty
+                                ? 'Ajouter une photo'
+                                : 'Ajouter une couche',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.2),
                             ),
-                            valueColor: AlwaysStoppedAnimation(
-                              rc.withValues(alpha: 0.7),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            minHeight: 5,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 32,
-                        child: Text(
-                          _dropLabels[r]!,
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            color: rc,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (sel) ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.check_circle, color: rc, size: 16),
-                      ],
                     ],
                   ),
-                ),
-              );
-            }),
-            const SizedBox(height: 20),
+                  // Opacité si une image est sélectionnée
+                  if (_selectedLayer >= 0 &&
+                      _selectedLayer < _images.length) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.opacity,
+                          color: Colors.white.withValues(alpha: 0.5),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Opacité',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _images[_selectedLayer].opacity,
+                            min: 0.1,
+                            max: 1.0,
+                            activeColor: const Color(0xFF7C3AED),
+                            onChanged:
+                                (v) => setState(
+                                  () => _images[_selectedLayer].opacity = v,
+                                ),
+                          ),
+                        ),
+                        Text(
+                          '${(_images[_selectedLayer].opacity * 100).round()}%',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 18),
 
-            _secTitle('Images (${_images.length})'),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _addImage(),
+                  // Ajouter texte
+                  OutlinedButton.icon(
+                    onPressed: _addText,
                     icon: const Icon(
-                      Icons.add_photo_alternate_rounded,
+                      Icons.text_fields_rounded,
                       color: Colors.white70,
                     ),
-                    label: Text(
-                      _images.isEmpty
-                          ? 'Ajouter une image'
-                          : 'Ajouter une couche',
-                      style: const TextStyle(color: Colors.white70),
+                    label: const Text(
+                      'Ajouter du texte',
+                      style: TextStyle(color: Colors.white70),
                     ),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(
@@ -1538,244 +2103,244 @@ class _CardCreatorState extends State<_CardCreator>
                       ),
                     ),
                   ),
-                ),
-                if (_images.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () => setState(() => _images.removeLast()),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: Colors.red.withValues(alpha: 0.4),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 12,
-                        horizontal: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.red,
-                      size: 20,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            if (_images.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Pince pour zoomer • Glisse pour bouger • Tape pour sélectionner/supprimer',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  fontSize: 11,
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
+                  const SizedBox(height: 18),
 
-            _secTitle('Textes (${_textZones.length})'),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _addText,
-              icon: const Icon(
-                Icons.text_fields_rounded,
-                color: Colors.white70,
-              ),
-              label: const Text(
-                'Ajouter une zone de texte',
-                style: TextStyle(color: Colors.white70),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            if (_textZones.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Tape sur un texte pour l\'éditer • Glisse pour le déplacer',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  fontSize: 11,
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-
-            _secTitle('Fond'),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                GestureDetector(
-                  onTap: () => setState(() => _selectedGrad = -1),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A2E),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color:
-                            _selectedGrad == -1 ? Colors.white : Colors.white24,
-                        width: _selectedGrad == -1 ? 3 : 1,
-                      ),
-                    ),
-                    child:
-                        _selectedGrad == -1
-                            ? const Icon(
-                              Icons.close,
-                              color: Colors.white38,
-                              size: 16,
-                            )
-                            : null,
-                  ),
-                ),
-                ...List.generate(
-                  _gradients.length,
-                  (i) => GestureDetector(
-                    onTap: () => setState(() => _selectedGrad = i),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: _gradients[i],
-                        ),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color:
-                              _selectedGrad == i
-                                  ? Colors.white
-                                  : Colors.transparent,
-                          width: 3,
+                  // Fond dégradé
+                  _secTitle('Fond'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedGrad = -1),
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A1A2E),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color:
+                                  _selectedGrad == -1
+                                      ? Colors.white
+                                      : Colors.white24,
+                              width: _selectedGrad == -1 ? 3 : 1,
+                            ),
+                          ),
+                          child:
+                              _selectedGrad == -1
+                                  ? const Icon(
+                                    Icons.close,
+                                    color: Colors.white38,
+                                    size: 14,
+                                  )
+                                  : null,
                         ),
                       ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
-            _secTitle('Couleur de fond'),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children:
-                  _backColors
-                      .map(
-                        (c) => GestureDetector(
-                          onTap: () => setState(() => _backColor = c),
+                      ...List.generate(
+                        _gradients.length,
+                        (i) => GestureDetector(
+                          onTap: () => setState(() => _selectedGrad = i),
                           child: Container(
-                            width: 42,
-                            height: 42,
+                            width: 38,
+                            height: 38,
                             decoration: BoxDecoration(
-                              color: Color(c),
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: _gradients[i],
+                              ),
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color:
-                                    _backColor == c
+                                    _selectedGrad == i
                                         ? Colors.white
-                                        : Colors.white24,
-                                width: _backColor == c ? 3 : 1,
+                                        : Colors.transparent,
+                                width: 3,
                               ),
                             ),
                           ),
                         ),
-                      )
-                      .toList(),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _addImage(isBack: true),
-                icon: const Icon(
-                  Icons.photo_library_rounded,
-                  color: Colors.white70,
-                ),
-                label: Text(
-                  _backImageBytes != null
-                      ? '✅ Image verso — changer'
-                      : 'Image verso (optionnel)',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ),
-          ],
+                  const SizedBox(height: 18),
 
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            child: GestureDetector(
-              onTap: _saving ? null : _save,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: widget.palette),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: widget.palette[0].withValues(alpha: 0.5),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child:
-                      _saving
-                          ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
+                  // Couleur de bordure personnalisée
+                  _secTitle('Couleur de bordure'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      // Option "couleur rareté"
+                      GestureDetector(
+                        onTap: () => setState(() => _borderColorIndex = -1),
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: _rc(_rarity),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color:
+                                  _borderColorIndex == -1
+                                      ? Colors.white
+                                      : Colors.transparent,
+                              width: 3,
                             ),
-                          )
-                          : const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.add_circle,
-                                color: Colors.white,
-                                size: 20,
+                          ),
+                          child:
+                              _borderColorIndex == -1
+                                  ? const Icon(
+                                    Icons.auto_awesome,
+                                    color: Colors.white,
+                                    size: 14,
+                                  )
+                                  : null,
+                        ),
+                      ),
+                      ...List.generate(
+                        _borderColors.length,
+                        (i) => GestureDetector(
+                          onTap: () => setState(() => _borderColorIndex = i),
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: _borderColors[i],
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color:
+                                    _borderColorIndex == i
+                                        ? Colors.white
+                                        : Colors.transparent,
+                                width: 3,
                               ),
-                              SizedBox(width: 8),
-                              Text(
-                                'Ajouter à la collection',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  // Verso
+                  _secTitle('Couleur de fond'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children:
+                        _backColors
+                            .map(
+                              (c) => GestureDetector(
+                                onTap: () => setState(() => _backColor = c),
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Color(c),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color:
+                                          _backColor == c
+                                              ? Colors.white
+                                              : Colors.white24,
+                                      width: _backColor == c ? 3 : 1,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ],
+                            )
+                            .toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _addImage(isBack: true),
+                      icon: const Icon(
+                        Icons.photo_library_rounded,
+                        color: Colors.white70,
+                      ),
+                      label: Text(
+                        _backImageBytes != null
+                            ? '✅ Image verso — changer'
+                            : 'Image verso (optionnel)',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.2),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+                // Bouton sauvegarder
+                SizedBox(
+                  width: double.infinity,
+                  child: GestureDetector(
+                    onTap: _saving ? null : _save,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: widget.palette),
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: widget.palette[0].withValues(alpha: 0.5),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
                           ),
+                        ],
+                      ),
+                      child: Center(
+                        child:
+                            _saving
+                                ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                : const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_circle,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Ajouter à la collection',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
-          const SizedBox(height: 40),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1832,152 +2397,7 @@ class _CardCreatorState extends State<_CardCreator>
   );
 }
 
-class _CardTile extends StatelessWidget {
-  final SavedCard card;
-  final bool revealed;
-  const _CardTile({required this.card, required this.revealed});
-
-  Color get _rc {
-    switch (card.rarity) {
-      case Rarity.legendary:
-        return const Color(0xFFFFD700);
-      case Rarity.epic:
-        return const Color(0xFF9C27B0);
-      case Rarity.rare:
-        return const Color(0xFF2196F3);
-      case Rarity.uncommon:
-        return const Color(0xFF4CAF50);
-      case Rarity.common:
-        return const Color(0xFF9E9E9E);
-    }
-  }
-
-  String get _rl {
-    switch (card.rarity) {
-      case Rarity.legendary:
-        return 'Légendaire';
-      case Rarity.epic:
-        return 'Épique';
-      case Rarity.rare:
-        return 'Rare';
-      case Rarity.uncommon:
-        return 'Peu commun';
-      case Rarity.common:
-        return 'Commun';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => revealed ? _front() : _back();
-
-  Widget _front() => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _rc, width: 2),
-      color: const Color(0xFF16213E),
-      boxShadow: [BoxShadow(color: _rc.withValues(alpha: 0.3), blurRadius: 6)],
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        children: [
-          if (card.imageBytes != null)
-            Positioned.fill(
-              child: Image.memory(card.imageBytes!, fit: BoxFit.cover),
-            ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.95),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    card.name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _rc.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      _rl,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 6,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _back() => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF1A1A3E), Color(0xFF0D0D1C)],
-      ),
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.1),
-        width: 1.5,
-      ),
-    ),
-    child: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.help_outline_rounded,
-            color: Colors.white.withValues(alpha: 0.15),
-            size: 28,
-          ),
-          Text(
-            '?',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.1),
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
+// Helpers globaux
 Color _rc(Rarity r) {
   switch (r) {
     case Rarity.legendary:

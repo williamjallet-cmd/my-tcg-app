@@ -1,4 +1,4 @@
-// collections_screen.dart — FIX : sync timer Supabase au chargement
+// collections_screen.dart — FEATURE 3 : modifier la collection via les 3 points
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -55,9 +55,6 @@ class _CollectionsScreenState extends State<CollectionsScreen>
     try {
       _myUserId = _service.userId;
       _collections = await _service.getMyCollections();
-
-      // FIX timer : sync le timer depuis Supabase pour chaque collection
-      // au démarrage, évite que le pack apparaisse toujours "disponible"
       for (final col in _collections) {
         await PackSystem.syncFromSupabase(col.id);
       }
@@ -181,6 +178,20 @@ class _CollectionsScreenState extends State<CollectionsScreen>
     }
   }
 
+  // FEATURE 3 : modifier la collection
+  Future<void> _editCollection(CollectionModel col) async {
+    final updated = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditCollectionSheet(collection: col),
+    );
+    if (updated == true) {
+      _showMsg('Collection mise à jour ! ✅');
+      await _load();
+    }
+  }
+
   void _openDetail(CollectionModel col) {
     Navigator.push(
       context,
@@ -252,6 +263,7 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                     onTap: () => _openDetail(_collections[i]),
                     onLeaveOrDelete: () => _leaveOrDelete(_collections[i]),
                     onShare: () => _showShareSheet(_collections[i]),
+                    onEdit: () => _editCollection(_collections[i]),
                   ),
                   childCount: _collections.length,
                 ),
@@ -371,14 +383,14 @@ class _CollectionsScreenState extends State<CollectionsScreen>
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TUILE COLLECTION
+//   TUILE COLLECTION — ajout onEdit
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CollectionCard extends StatefulWidget {
   final CollectionModel collection;
   final String myUserId;
   final List<Color> palette;
-  final VoidCallback onTap, onLeaveOrDelete, onShare;
+  final VoidCallback onTap, onLeaveOrDelete, onShare, onEdit;
 
   const _CollectionCard({
     required this.collection,
@@ -387,6 +399,7 @@ class _CollectionCard extends StatefulWidget {
     required this.onTap,
     required this.onLeaveOrDelete,
     required this.onShare,
+    required this.onEdit,
   });
 
   @override
@@ -405,25 +418,25 @@ class _CollectionCardState extends State<_CollectionCard> {
   }
 
   Future<void> _refresh() async {
-    // FIX timer : syncFromSupabase déjà appelé dans _load() du parent,
-    // on lit directement le cache local ici
     final r = await PackSystem.timeUntilNextPack(widget.collection.id);
     final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted)
+    if (mounted) {
       setState(() {
         _remaining = r;
         _canOpen = c;
       });
+    }
     if (!c) {
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
         final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
         final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted)
+        if (mounted) {
           setState(() {
             _remaining = r2;
             _canOpen = c2;
           });
+        }
         if (c2) _timer?.cancel();
       });
     }
@@ -545,6 +558,7 @@ class _CollectionCardState extends State<_CollectionCard> {
                               Colors.white,
                             ),
                             const SizedBox(width: 6),
+                            // FEATURE 3 : menu mis à jour avec option "Modifier"
                             PopupMenuButton<String>(
                               color: const Color(0xFF1A1A2E),
                               icon: const Icon(
@@ -556,6 +570,7 @@ class _CollectionCardState extends State<_CollectionCard> {
                               ),
                               onSelected: (v) {
                                 if (v == 'share') widget.onShare();
+                                if (v == 'edit') widget.onEdit();
                                 if (v == 'leave') widget.onLeaveOrDelete();
                               },
                               itemBuilder:
@@ -579,6 +594,27 @@ class _CollectionCardState extends State<_CollectionCard> {
                                         ],
                                       ),
                                     ),
+                                    // Option Modifier — uniquement pour le propriétaire
+                                    if (_isOwner)
+                                      const PopupMenuItem(
+                                        value: 'edit',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.edit_rounded,
+                                              color: Colors.white54,
+                                              size: 18,
+                                            ),
+                                            SizedBox(width: 10),
+                                            Text(
+                                              'Modifier',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     PopupMenuItem(
                                       value: 'leave',
                                       child: Row(
@@ -768,6 +804,347 @@ class _CollectionCardState extends State<_CollectionCard> {
       ],
     ),
   );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   FEATURE 3 : MODIFIER COLLECTION (bottom sheet)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class _EditCollectionSheet extends StatefulWidget {
+  final CollectionModel collection;
+  const _EditCollectionSheet({required this.collection});
+  @override
+  State<_EditCollectionSheet> createState() => _EditCollectionSheetState();
+}
+
+class _EditCollectionSheetState extends State<_EditCollectionSheet> {
+  late int _cooldown;
+  late bool _membersCanAdd;
+  Uint8List? _newImageBytes;
+  bool _saving = false;
+  final _cooldowns = [1, 2, 3, 6, 12, 24];
+
+  @override
+  void initState() {
+    super.initState();
+    _cooldown = widget.collection.packCooldownHours;
+    _membersCanAdd = widget.collection.membersCanAddCards;
+  }
+
+  Future<void> _pickImage() async {
+    final file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      imageQuality: 85,
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    setState(() => _newImageBytes = bytes);
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await CollectionService.instance.updateCollection(
+        collectionId: widget.collection.id,
+        imageBytes: _newImageBytes,
+        packCooldownHours: _cooldown,
+        membersCanAddCards: _membersCanAdd,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur : $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 32,
+        left: 24,
+        right: 24,
+        top: 20,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F0F1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Modifier la collection',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.close, color: Colors.white38),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Image de couverture
+          GestureDetector(
+            onTap: _pickImage,
+            child: Container(
+              width: double.infinity,
+              height: 110,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: Colors.white.withValues(alpha: 0.05),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Stack(
+                  children: [
+                    if (_newImageBytes != null)
+                      Positioned.fill(
+                        child: Image.memory(_newImageBytes!, fit: BoxFit.cover),
+                      )
+                    else if (widget.collection.imageUrl != null)
+                      Positioned.fill(
+                        child: Image.network(
+                          widget.collection.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.add_photo_alternate_rounded,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _newImageBytes != null
+                                ? '✅ Nouvelle image sélectionnée'
+                                : (widget.collection.imageUrl != null
+                                    ? 'Changer l\'image'
+                                    : 'Ajouter une image'),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Cooldown
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'COOLDOWN',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.4),
+                fontSize: 10,
+                letterSpacing: 2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children:
+                _cooldowns.map((h) {
+                  final sel = _cooldown == h;
+                  return GestureDetector(
+                    onTap: () => setState(() => _cooldown = h),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient:
+                            sel
+                                ? const LinearGradient(
+                                  colors: [
+                                    Color(0xFF7C3AED),
+                                    Color(0xFFDB2777),
+                                  ],
+                                )
+                                : null,
+                        color:
+                            sel ? null : Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color:
+                              sel
+                                  ? Colors.transparent
+                                  : Colors.white.withValues(alpha: 0.1),
+                        ),
+                        boxShadow:
+                            sel
+                                ? [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFF7C3AED,
+                                    ).withValues(alpha: 0.4),
+                                    blurRadius: 10,
+                                  ),
+                                ]
+                                : [],
+                      ),
+                      child: Text(
+                        '${h}h',
+                        style: TextStyle(
+                          color:
+                              sel
+                                  ? Colors.white
+                                  : Colors.white.withValues(alpha: 0.5),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+          ),
+          const SizedBox(height: 16),
+
+          // Membres
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.people_rounded,
+                  color: Colors.white54,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Membres peuvent ajouter des cartes',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Sinon, seul toi peux ajouter',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _membersCanAdd,
+                  onChanged: (v) => setState(() => _membersCanAdd = v),
+                  activeColor: const Color(0xFF7C3AED),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Bouton sauvegarder
+          SizedBox(
+            width: double.infinity,
+            child: GestureDetector(
+              onTap: _saving ? null : _save,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child:
+                      _saving
+                          ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                          : const Text(
+                            'Enregistrer les modifications',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

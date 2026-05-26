@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'card_creator_screen.dart';
 import 'card_storage.dart';
 import 'card_model.dart';
@@ -245,11 +244,12 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   Future<void> _loadCards() async {
     final cards = await CardStorage.loadCards();
-    if (mounted)
+    if (mounted) {
       setState(() {
         _cards = cards;
         _loading = false;
       });
+    }
   }
 
   Color _rc(Rarity r) {
@@ -575,11 +575,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final p = await ProfileService.instance.getMyProfile();
-    if (mounted)
+    if (mounted) {
       setState(() {
         _profile = p;
         _loading = false;
       });
+    }
   }
 
   void _showAvatarPicker() {
@@ -625,11 +626,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: cacheBustedUrl,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _profile = updated;
           _uploading = false;
         });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _uploading = false);
@@ -650,11 +652,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: 'preset:$emoji',
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _profile = updated;
           _uploading = false;
         });
+      }
     } catch (_) {
       if (mounted) setState(() => _uploading = false);
     }
