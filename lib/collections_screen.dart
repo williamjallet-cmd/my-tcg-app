@@ -409,23 +409,21 @@ class _CollectionCardState extends State<_CollectionCard> {
     // on lit directement le cache local ici
     final r = await PackSystem.timeUntilNextPack(widget.collection.id);
     final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted) {
+    if (mounted)
       setState(() {
         _remaining = r;
         _canOpen = c;
       });
-    }
     if (!c) {
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
         final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
         final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted) {
+        if (mounted)
           setState(() {
             _remaining = r2;
             _canOpen = c2;
           });
-        }
         if (c2) _timer?.cancel();
       });
     }

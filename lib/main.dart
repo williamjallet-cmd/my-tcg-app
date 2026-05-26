@@ -16,6 +16,8 @@ import 'secrets.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // supabase_flutter v2 restaure la session PENDANT initialize()
+  // Donc currentSession est disponible immédiatement après
   await Supabase.initialize(
     url: Secrets.supabaseUrl,
     anonKey: Secrets.supabaseAnonKey,
@@ -66,64 +68,31 @@ class _AuthGateState extends State<_AuthGate> {
   }
 
   Future<void> _init() async {
-    // FIX persistance : lit remember_me avant d'écouter le stream
-    final prefs = await SharedPreferences.getInstance();
-    final rememberMe = prefs.getBool('remember_me') ?? true;
-
-    // FIX persistance : écoute initialSession au lieu d'un délai arbitraire
-    // initialSession se déclenche quand Supabase a restauré la session du stockage
-    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
-      data,
-    ) async {
-      if (!mounted) return;
-      final event = data.event;
-
-      if (event == AuthChangeEvent.initialSession) {
-        // Premier événement au démarrage : session restaurée (ou null)
-        final session = data.session;
-        if (session != null && !rememberMe) {
-          // L'utilisateur n'a pas coché "rester connecté" → déconnexion
-          await Supabase.instance.client.auth.signOut();
-          if (mounted) {
-            setState(() {
-              _ready = true;
-              _loggedIn = false;
-            });
-          }
-        } else {
-          if (mounted) {
-            setState(() {
-              _ready = true;
-              _loggedIn = session != null;
-            });
-          }
-        }
-      } else if (event == AuthChangeEvent.signedIn) {
-        if (mounted) {
-          setState(() {
-            _loggedIn = true;
-            _ready = true;
-          });
-        }
-      } else if (event == AuthChangeEvent.signedOut) {
-        if (mounted) {
-          setState(() {
-            _loggedIn = false;
-            _ready = true;
-          });
-        }
-      }
-    });
-
-    // Sécurité : si initialSession ne se déclenche pas dans les 3s, on continue
-    await Future.delayed(const Duration(seconds: 3));
-    if (mounted && !_ready) {
-      final session = Supabase.instance.client.auth.currentSession;
+    // FIX AUTH : supabase_flutter v2 restaure la session dans initialize()
+    // On lit currentSession directement — pas besoin d'attendre initialSession
+    final session = Supabase.instance.client.auth.currentSession;
+    if (mounted) {
       setState(() {
         _ready = true;
         _loggedIn = session != null;
       });
     }
+
+    // Écoute les changements ultérieurs (connexion / déconnexion)
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (!mounted) return;
+      switch (data.event) {
+        case AuthChangeEvent.signedIn:
+        case AuthChangeEvent.tokenRefreshed:
+          setState(() => _loggedIn = true);
+          break;
+        case AuthChangeEvent.signedOut:
+          setState(() => _loggedIn = false);
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   @override
@@ -276,12 +245,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   Future<void> _loadCards() async {
     final cards = await CardStorage.loadCards();
-    if (mounted) {
+    if (mounted)
       setState(() {
         _cards = cards;
         _loading = false;
       });
-    }
   }
 
   Color _rc(Rarity r) {
@@ -607,12 +575,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final p = await ProfileService.instance.getMyProfile();
-    if (mounted) {
+    if (mounted)
       setState(() {
         _profile = p;
         _loading = false;
       });
-    }
   }
 
   void _showAvatarPicker() {
@@ -658,12 +625,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: cacheBustedUrl,
       );
-      if (mounted) {
+      if (mounted)
         setState(() {
           _profile = updated;
           _uploading = false;
         });
-      }
     } catch (e) {
       if (mounted) {
         setState(() => _uploading = false);
@@ -684,12 +650,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: 'preset:$emoji',
       );
-      if (mounted) {
+      if (mounted)
         setState(() {
           _profile = updated;
           _uploading = false;
         });
-      }
     } catch (_) {
       if (mounted) setState(() => _uploading = false);
     }
