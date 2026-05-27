@@ -1,7 +1,6 @@
 ﻿// collection_detail_screen.dart
-// FEATURES : drag mobile, panneau couches, inspection 3D cartes collectées
-// FIX 1 : isolation des cartes par collection (_catalogue ne retourne plus _allCards)
-// FIX 2 : mode déplacement — glisse sur la carte pour bouger l'élément sélectionné
+// FIX 1 : isolation des cartes par collection
+// FIX 2 : mode déplacement avec Listener — bypass complet de l'arène de gestes
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -102,6 +101,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Set<String> _catalogueIds = {};
   bool _loading = true;
   String _sortBy = 'rarity';
+  // FIX scroll : état remonté depuis _CardCreator pour bloquer
+  // TabBarView (gauche/droite) ET NestedScrollView (haut/bas)
+  bool _cardMoveMode = false;
 
   @override
   void initState() {
@@ -126,23 +128,21 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   void _startTimer() async {
     final r = await PackSystem.timeUntilNextPack(widget.collection.id);
     final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted) {
+    if (mounted)
       setState(() {
         _remaining = r;
         _canOpen = c;
       });
-    }
     if (!c) {
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
         final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
         final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted) {
+        if (mounted)
           setState(() {
             _remaining = r2;
             _canOpen = c2;
           });
-        }
         if (c2) _timer?.cancel();
       });
     }
@@ -189,9 +189,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     }
   }
 
-  // FIX 1 : ne plus retourner _allCards quand _catalogueIds est vide
-  // Avant : if (_catalogueIds.isEmpty) return _allCards;
-  // → les cartes d'autres collections se retrouvaient dans les packs
+  // FIX 1 : plus de fallback _allCards → isolation stricte par collection
   List<SavedCard> get _catalogue {
     if (_catalogueIds.isEmpty) return [];
     return _allCards.where((c) => _catalogueIds.contains(c.id)).toList();
@@ -243,9 +241,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   List<SavedCard> _sorted(List<SavedCard> cards) {
     final l = [...cards];
-    if (_sortBy == 'rarity') {
+    if (_sortBy == 'rarity')
       l.sort((a, b) => b.rarity.index.compareTo(a.rarity.index));
-    }
     if (_sortBy == 'name') l.sort((a, b) => a.name.compareTo(b.name));
     return l;
   }
@@ -256,6 +253,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     return Scaffold(
       backgroundColor: const Color(0xFF080814),
       body: NestedScrollView(
+        // FIX : bloque le scroll vertical quand on déplace un élément
+        physics:
+            _cardMoveMode
+                ? const NeverScrollableScrollPhysics()
+                : const ScrollPhysics(),
         headerSliverBuilder: (_, __) => [_appBar(p)],
         body: Column(
           children: [
@@ -283,6 +285,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                       )
                       : TabBarView(
                         controller: _tabCtrl,
+                        // FIX : bloque le scroll gauche/droite quand on déplace un élément
+                        physics:
+                            _cardMoveMode
+                                ? const NeverScrollableScrollPhysics()
+                                : const ScrollPhysics(),
                         children: [_packTab(p), _cardsTab(), _createTab(p)],
                       ),
             ),
@@ -438,7 +445,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   List<Widget> _dropRows() =>
       Rarity.values.reversed.map((r) {
         final rc = _rc(r);
-        final pct = _dropLabels[r]!;
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
@@ -476,7 +482,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
               SizedBox(
                 width: 36,
                 child: Text(
-                  pct,
+                  _dropLabels[r]!,
                   textAlign: TextAlign.right,
                   style: TextStyle(
                     color: rc,
@@ -692,6 +698,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget _createTab(List<Color> p) => _CardCreator(
     palette: p,
     collectionId: widget.collection.id,
+    onMoveModeChanged: (v) => setState(() => _cardMoveMode = v),
     onSaved: () {
       _msg('✅ Carte ajoutée !');
       _loadCards();
@@ -924,18 +931,22 @@ class _ImgLayer {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //   CRÉATEUR DE CARTE
-// FIX 2 : _cardArea() intercepte les gestes quand une couche est sélectionnée
-//          → le scroll parent ne vole plus les drags
+//   FIX 2 : Listener sur la carte + mode déplacement
+//   • Quand _moveMode = true : scroll désactivé, Listener capte
+//     TOUS les pointeurs → bypass total de l'arène de gestes
+//   • L'élément sélectionné (_selectedLayer) suit le doigt
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CardCreator extends StatefulWidget {
   final List<Color> palette;
   final String collectionId;
   final VoidCallback onSaved;
+  final void Function(bool) onMoveModeChanged;
   const _CardCreator({
     required this.palette,
     required this.collectionId,
     required this.onSaved,
+    required this.onMoveModeChanged,
   });
   @override
   State<_CardCreator> createState() => _CardCreatorState();
@@ -948,10 +959,13 @@ class _CardCreatorState extends State<_CardCreator>
   bool _showBack = false;
   bool _saving = false;
 
+  // FIX 2 : mode déplacement
+  bool _moveMode = false;
+
   final List<_ImgLayer> _images = [];
   final List<TextZone> _textZones = [];
 
-  // Couche sélectionnée (-1 = aucune, index >= 0 = image, -2 = nom, -3 = rareté)
+  // -1 = aucun, >=0 = image, -2 = nom, -3 = rareté
   int _selectedLayer = -1;
 
   double _nameX = 8, _nameY = 200;
@@ -1052,6 +1066,38 @@ class _CardCreatorState extends State<_CardCreator>
   Color get _currentBorderColor =>
       _borderColorIndex >= 0 ? _borderColors[_borderColorIndex] : _rc(_rarity);
 
+  // ── FIX 2 : déplace l'élément sélectionné ─────────────────────────────────
+  void _moveSelected(Offset delta) {
+    if (_selectedLayer == -2) {
+      setState(() {
+        _nameX = (_nameX + delta.dx).clamp(0.0, _cW - 60);
+        _nameY = (_nameY + delta.dy).clamp(0.0, _cH - 20);
+      });
+    } else if (_selectedLayer == -3) {
+      setState(() {
+        _rarityX = (_rarityX + delta.dx).clamp(0.0, _cW - 60);
+        _rarityY = (_rarityY + delta.dy).clamp(0.0, _cH - 16);
+      });
+    } else if (_selectedLayer >= 0 && _selectedLayer < _images.length) {
+      final l = _images[_selectedLayer];
+      setState(() {
+        l.x = (l.x + delta.dx).clamp(-_cW, _cW * 2);
+        l.y = (l.y + delta.dy).clamp(-_cH, _cH * 2);
+      });
+    } else if (_selectedLayer >= 100) {
+      // textes : index 100+ = textZones[index-100]
+      final i = _selectedLayer - 100;
+      if (i < _textZones.length) {
+        final z = _textZones[i];
+        setState(() {
+          z.x = (z.x + delta.dx).clamp(0.0, _cW - 20);
+          z.y = (z.y + delta.dy).clamp(0.0, _cH - 20);
+        });
+      }
+    }
+  }
+
+  // ── Ajout image / texte ────────────────────────────────────────────────────
   Future<void> _addImage({bool isBack = false}) async {
     final file = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -1066,6 +1112,8 @@ class _CardCreatorState extends State<_CardCreator>
       } else {
         _images.add(_ImgLayer(bytes: bytes));
         _selectedLayer = _images.length - 1;
+        _moveMode = true;
+        widget.onMoveModeChanged(true);
       }
     });
   }
@@ -1078,7 +1126,12 @@ class _CardCreatorState extends State<_CardCreator>
       fontSize: 13,
       color: 0xFFFFFFFF,
     );
-    setState(() => _textZones.add(zone));
+    setState(() {
+      _textZones.add(zone);
+      _selectedLayer = 100 + _textZones.length - 1;
+      _moveMode = true;
+      widget.onMoveModeChanged(true);
+    });
     _editText(_textZones.length - 1);
   }
 
@@ -1251,9 +1304,7 @@ class _CardCreatorState extends State<_CardCreator>
                     ),
                     TextButton(
                       onPressed: () {
-                        setState(() {
-                          zone.text = ctrl.text;
-                        });
+                        setState(() => zone.text = ctrl.text);
                         Navigator.pop(ctx);
                       },
                       child: const Text(
@@ -1267,13 +1318,24 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
-  // ── Panneau couches ────────────────────────────────────────────────────────
+  // ── Label de l'élément sélectionné ────────────────────────────────────────
+  String get _selectedLabel {
+    if (_selectedLayer == -2) return 'Nom';
+    if (_selectedLayer == -3) return 'Rareté';
+    if (_selectedLayer >= 0 && _selectedLayer < _images.length)
+      return 'Photo ${_selectedLayer + 1}';
+    if (_selectedLayer >= 100) return 'Texte ${_selectedLayer - 99}';
+    return '';
+  }
+
+  // ── Panneau chips ──────────────────────────────────────────────────────────
   Widget _buildLayerPanel() {
-    if (_images.isEmpty && _textZones.isEmpty) {
+    final hasLayers = _images.isNotEmpty || _textZones.isNotEmpty;
+    if (!hasLayers) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Text(
-          'Ajoute des photos ou du texte pour voir les couches ici',
+          'Ajoute des photos ou du texte pour voir les éléments ici',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.25),
             fontSize: 11,
@@ -1288,51 +1350,36 @@ class _CardCreatorState extends State<_CardCreator>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
-          _layerChip(
-            icon: const Icon(
-              Icons.badge_rounded,
-              color: Colors.white,
-              size: 14,
-            ),
+          _chip2(
+            icon: Icons.badge_rounded,
             label: 'Nom',
-            selected: _selectedLayer == -2,
+            sel: _selectedLayer == -2,
             onTap:
-                () => setState(
-                  () => _selectedLayer = _selectedLayer == -2 ? -1 : -2,
-                ),
-            onDelete: null,
+                () => setState(() {
+                  _selectedLayer = _selectedLayer == -2 ? -1 : -2;
+                  if (_selectedLayer != -1) _moveMode = true;
+                }),
           ),
-          _layerChip(
-            icon: const Icon(
-              Icons.label_rounded,
-              color: Colors.white,
-              size: 14,
-            ),
+          _chip2(
+            icon: Icons.label_rounded,
             label: 'Rareté',
-            selected: _selectedLayer == -3,
+            sel: _selectedLayer == -3,
             onTap:
-                () => setState(
-                  () => _selectedLayer = _selectedLayer == -3 ? -1 : -3,
-                ),
-            onDelete: null,
+                () => setState(() {
+                  _selectedLayer = _selectedLayer == -3 ? -1 : -3;
+                  if (_selectedLayer != -1) _moveMode = true;
+                }),
           ),
           for (var i = 0; i < _images.length; i++)
-            _layerChip(
-              icon: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.memory(
-                  _images[i].bytes,
-                  width: 24,
-                  height: 24,
-                  fit: BoxFit.cover,
-                ),
-              ),
+            _chip2(
+              imageBytes: _images[i].bytes,
               label: 'Photo ${i + 1}',
-              selected: _selectedLayer == i,
+              sel: _selectedLayer == i,
               onTap:
-                  () => setState(
-                    () => _selectedLayer = _selectedLayer == i ? -1 : i,
-                  ),
+                  () => setState(() {
+                    _selectedLayer = _selectedLayer == i ? -1 : i;
+                    if (_selectedLayer != -1) _moveMode = true;
+                  }),
               onDelete:
                   () => setState(() {
                     _images.removeAt(i);
@@ -1340,15 +1387,17 @@ class _CardCreatorState extends State<_CardCreator>
                   }),
             ),
           for (var i = 0; i < _textZones.length; i++)
-            _layerChip(
-              icon: const Icon(
-                Icons.text_fields_rounded,
-                color: Colors.white,
-                size: 14,
-              ),
+            _chip2(
+              icon: Icons.text_fields_rounded,
               label: 'Texte ${i + 1}',
-              selected: false,
-              onTap: () => _editText(i),
+              sel: _selectedLayer == 100 + i,
+              onTap: () {
+                _editText(i);
+                setState(() {
+                  _selectedLayer = 100 + i;
+                  _moveMode = true;
+                });
+              },
               onDelete: () => setState(() => _textZones.removeAt(i)),
             ),
         ],
@@ -1356,12 +1405,13 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
-  Widget _layerChip({
-    required Widget icon,
+  Widget _chip2({
+    IconData? icon,
+    Uint8List? imageBytes,
     required String label,
-    required bool selected,
+    required bool sel,
     required VoidCallback onTap,
-    required VoidCallback? onDelete,
+    VoidCallback? onDelete,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -1375,22 +1425,33 @@ class _CardCreatorState extends State<_CardCreator>
         ),
         decoration: BoxDecoration(
           color:
-              selected
+              sel
                   ? const Color(0xFF7C3AED).withValues(alpha: 0.25)
                   : Colors.white.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color:
-                selected
+                sel
                     ? const Color(0xFF7C3AED)
                     : Colors.white.withValues(alpha: 0.15),
-            width: selected ? 1.5 : 1,
+            width: sel ? 1.5 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            icon,
+            if (imageBytes != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.memory(
+                  imageBytes,
+                  width: 24,
+                  height: 24,
+                  fit: BoxFit.cover,
+                ),
+              )
+            else
+              Icon(icon ?? Icons.layers, color: Colors.white, size: 14),
             const SizedBox(width: 6),
             Text(
               label,
@@ -1417,105 +1478,7 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
-  // ── FIX 2 : déplace l'élément sélectionné ─────────────────────────────────
-  void _moveSelectedLayer(Offset delta) {
-    if (_selectedLayer == -2) {
-      setState(() {
-        _nameX = (_nameX + delta.dx).clamp(0.0, _cW - 60);
-        _nameY = (_nameY + delta.dy).clamp(0.0, _cH - 20);
-      });
-    } else if (_selectedLayer == -3) {
-      setState(() {
-        _rarityX = (_rarityX + delta.dx).clamp(0.0, _cW - 60);
-        _rarityY = (_rarityY + delta.dy).clamp(0.0, _cH - 16);
-      });
-    } else if (_selectedLayer >= 0 && _selectedLayer < _images.length) {
-      final layer = _images[_selectedLayer];
-      setState(() {
-        layer.x = (layer.x + delta.dx).clamp(-_cW, _cW * 2);
-        layer.y = (layer.y + delta.dy).clamp(-_cH, _cH * 2);
-      });
-    }
-  }
-
-  // ── FIX 2 : zone carte avec interception de gestes ────────────────────────
-  // Quand une couche est sélectionnée via un chip :
-  //   • onPanStart: (_) {} → remporte l'arène de gestes contre le scroll parent
-  //   • onPanUpdate: _moveSelectedLayer → glisser n'importe où sur la carte
-  //     déplace l'élément sélectionné
-  Widget _cardArea() {
-    final card = _showBack ? _buildBack() : _buildFront();
-
-    if (_selectedLayer == -1 || _showBack) {
-      return Center(child: card);
-    }
-
-    final label =
-        _selectedLayer == -2
-            ? 'Nom'
-            : _selectedLayer == -3
-            ? 'Rareté'
-            : _selectedLayer >= 0 && _selectedLayer < _images.length
-            ? 'Photo ${_selectedLayer + 1}'
-            : 'Texte';
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Bandeau mode déplacement
-        Container(
-          margin: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.45),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.open_with_rounded,
-                color: Color(0xFF7C3AED),
-                size: 13,
-              ),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  '✋ Glisse sur la carte pour déplacer · $label sélectionné',
-                  style: const TextStyle(
-                    color: Color(0xFFB06EF3),
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 7),
-              GestureDetector(
-                onTap: () => setState(() => _selectedLayer = -1),
-                child: const Icon(
-                  Icons.close_rounded,
-                  color: Color(0xFF7C3AED),
-                  size: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Carte avec interception — onPanStart() gagne l'arène avant le scroll
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanStart: (_) {},
-          onPanUpdate: (d) => _moveSelectedLayer(d.delta),
-          child: Center(child: card),
-        ),
-      ],
-    );
-  }
-
-  // ── Canvas recto ──────────────────────────────────────────────────────────
+  // ── Canvas carte — avec Listener pour le mode déplacement ─────────────────
   Widget _buildFront() {
     final rc = _currentBorderColor;
 
@@ -1545,34 +1508,14 @@ class _CardCreatorState extends State<_CardCreator>
               ..._images.asMap().entries.map((e) {
                 final i = e.key;
                 final layer = e.value;
-                final isSelected = _selectedLayer == i;
                 return Positioned(
                   left: layer.x,
                   top: layer.y,
                   child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
                     onTap:
-                        () => setState(
-                          () => _selectedLayer = isSelected ? -1 : i,
-                        ),
-                    // FIX 2 : onScaleStart remporte l'arène contre le scroll
-                    onScaleStart: (_) {},
-                    onScaleUpdate:
-                        (d) => setState(() {
-                          layer.x = (layer.x + d.focalPointDelta.dx).clamp(
-                            -_cW,
-                            _cW * 2,
-                          );
-                          layer.y = (layer.y + d.focalPointDelta.dy).clamp(
-                            -_cH,
-                            _cH * 2,
-                          );
-                          if (d.scale != 1.0) {
-                            layer.scale = (layer.scale * d.scale).clamp(
-                              0.1,
-                              6.0,
-                            );
-                          }
+                        () => setState(() {
+                          _selectedLayer = _selectedLayer == i ? -1 : i;
+                          if (_selectedLayer != -1) _moveMode = true;
                         }),
                     child: Stack(
                       children: [
@@ -1588,7 +1531,7 @@ class _CardCreatorState extends State<_CardCreator>
                             ),
                           ),
                         ),
-                        if (isSelected)
+                        if (_selectedLayer == i)
                           Positioned.fill(
                             child: Container(
                               decoration: BoxDecoration(
@@ -1610,19 +1553,18 @@ class _CardCreatorState extends State<_CardCreator>
               ..._textZones.asMap().entries.map((e) {
                 final i = e.key;
                 final zone = e.value;
+                final sel = _selectedLayer == 100 + i;
                 return Positioned(
                   left: zone.x,
                   top: zone.y,
                   child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _editText(i),
-                    // FIX 2 : onPanStart remporte l'arène
-                    onPanStart: (_) {},
-                    onPanUpdate:
-                        (d) => setState(() {
-                          zone.x = (zone.x + d.delta.dx).clamp(0, _cW - 20);
-                          zone.y = (zone.y + d.delta.dy).clamp(0, _cH - 20);
-                        }),
+                    onTap: () {
+                      setState(() {
+                        _selectedLayer = sel ? -1 : 100 + i;
+                        if (_selectedLayer != -1) _moveMode = true;
+                      });
+                      if (!sel) _editText(i);
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 4,
@@ -1631,6 +1573,13 @@ class _CardCreatorState extends State<_CardCreator>
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(4),
+                        border:
+                            sel
+                                ? Border.all(
+                                  color: const Color(0xFF7C3AED),
+                                  width: 1.5,
+                                )
+                                : null,
                       ),
                       child: Text(
                         zone.text,
@@ -1665,22 +1614,15 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
               ),
 
-              // Nom (draggable)
+              // Nom
               Positioned(
                 left: _nameX,
                 top: _nameY,
                 child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
                   onTap:
-                      () => setState(
-                        () => _selectedLayer = _selectedLayer == -2 ? -1 : -2,
-                      ),
-                  // FIX 2 : onPanStart remporte l'arène
-                  onPanStart: (_) {},
-                  onPanUpdate:
-                      (d) => setState(() {
-                        _nameX = (_nameX + d.delta.dx).clamp(0, _cW - 60);
-                        _nameY = (_nameY + d.delta.dy).clamp(0, _cH - 20);
+                      () => setState(() {
+                        _selectedLayer = _selectedLayer == -2 ? -1 : -2;
+                        if (_selectedLayer != -1) _moveMode = true;
                       }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1710,22 +1652,15 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
               ),
 
-              // Rareté (draggable)
+              // Rareté
               Positioned(
                 left: _rarityX,
                 top: _rarityY,
                 child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
                   onTap:
-                      () => setState(
-                        () => _selectedLayer = _selectedLayer == -3 ? -1 : -3,
-                      ),
-                  // FIX 2 : onPanStart remporte l'arène
-                  onPanStart: (_) {},
-                  onPanUpdate:
-                      (d) => setState(() {
-                        _rarityX = (_rarityX + d.delta.dx).clamp(0, _cW - 60);
-                        _rarityY = (_rarityY + d.delta.dy).clamp(0, _cH - 16);
+                      () => setState(() {
+                        _selectedLayer = _selectedLayer == -3 ? -1 : -3;
+                        if (_selectedLayer != -1) _moveMode = true;
                       }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1926,17 +1861,18 @@ class _CardCreatorState extends State<_CardCreator>
         _showBack = false;
         _selectedLayer = -1;
         _borderColorIndex = -1;
+        _moveMode = false;
+        widget.onMoveModeChanged(false);
       });
       widget.onSaved();
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur : $e'),
             backgroundColor: Colors.red.shade800,
           ),
         );
-      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1947,11 +1883,10 @@ class _CardCreatorState extends State<_CardCreator>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Toggle recto/verso
+        // ── Ligne 1 : toggle recto/verso + bouton mode déplacement ────────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _toggleBtn(
                 'Recto',
@@ -1964,15 +1899,171 @@ class _CardCreatorState extends State<_CardCreator>
                 _showBack,
                 () => setState(() => _showBack = true),
               ),
+              const Spacer(),
+              // FIX 2 : bouton mode déplacement
+              GestureDetector(
+                onTap:
+                    () => setState(() {
+                      _moveMode = !_moveMode;
+                      if (!_moveMode) _selectedLayer = -1;
+                      widget.onMoveModeChanged(_moveMode);
+                    }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient:
+                        _moveMode
+                            ? const LinearGradient(
+                              colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                            )
+                            : null,
+                    color:
+                        _moveMode ? null : Colors.white.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color:
+                          _moveMode
+                              ? Colors.transparent
+                              : Colors.white.withValues(alpha: 0.2),
+                    ),
+                    boxShadow:
+                        _moveMode
+                            ? [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF7C3AED,
+                                ).withValues(alpha: 0.4),
+                                blurRadius: 12,
+                              ),
+                            ]
+                            : [],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _moveMode
+                            ? Icons.open_with_rounded
+                            : Icons.touch_app_outlined,
+                        color: Colors.white,
+                        size: 15,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _moveMode ? 'Déplacer ON' : 'Déplacer',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
 
-        // FIX 2 : _cardArea() au lieu de Center(child: ...) direct
-        // → intercepte les gestes quand une couche est sélectionnée
-        _cardArea(),
+        // ── Bandeau info mode déplacement ──────────────────────────────────────
+        if (_moveMode && !_showBack)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: Color(0xFFB06EF3),
+                  size: 14,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _selectedLayer == -1
+                        ? '👆 Tape un élément sur la carte ou un chip ci-dessous pour le sélectionner'
+                        : '✋ Glisse sur la carte pour déplacer · $_selectedLabel sélectionné',
+                    style: const TextStyle(
+                      color: Color(0xFFB06EF3),
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
 
-        // Bouton 3D inspect
+        // ── Canvas carte — FIX 2 : Listener bypass l'arène de gestes ──────────
+        // Listener.onPointerMove ne passe PAS par l'arène → reçoit TOUS
+        // les événements, même si un scroll parent veut les capturer
+        Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerMove:
+              _moveMode && _selectedLayer != -1
+                  ? (e) => _moveSelected(e.delta)
+                  : null,
+          child: Center(child: _showBack ? _buildBack() : _buildFront()),
+        ),
+
+        // FIX : bouton "Terminer" collé sous la carte, toujours visible
+        // même quand le scroll est bloqué — permet de quitter le mode déplacement
+        if (_moveMode && !_showBack)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _moveMode = false;
+                  _selectedLayer = -1;
+                });
+                widget.onMoveModeChanged(false);
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_rounded, color: Colors.white, size: 16),
+                    SizedBox(width: 8),
+                    Text(
+                      '✓ Terminer le déplacement',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+        // Bouton 3D
         TextButton.icon(
           onPressed:
               () => Navigator.push(
@@ -1992,15 +2083,19 @@ class _CardCreatorState extends State<_CardCreator>
           ),
         ),
 
-        // Panneau couches
+        // Chips couches
         if (!_showBack) _buildLayerPanel(),
 
-        // Séparateur
         Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
 
-        // Paramètres scrollables
+        // ── Paramètres scrollables ─────────────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
+            // FIX 2 : désactive le scroll quand le mode déplacement est actif
+            physics:
+                _moveMode
+                    ? const NeverScrollableScrollPhysics()
+                    : const ClampingScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2012,16 +2107,7 @@ class _CardCreatorState extends State<_CardCreator>
                     style: const TextStyle(color: Colors.white),
                     decoration: _deco('Nom de la carte', Icons.badge_rounded),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '💡 Tape un chip pour sélectionner · glisse sur la carte pour déplacer',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.3),
-                      fontSize: 11,
-                    ),
-                  ),
                   const SizedBox(height: 18),
-
                   _secTitle('Rareté'),
                   const SizedBox(height: 8),
                   ...Rarity.values.map((r) {
@@ -2115,7 +2201,6 @@ class _CardCreatorState extends State<_CardCreator>
                     );
                   }),
                   const SizedBox(height: 18),
-
                   Row(
                     children: [
                       Expanded(
@@ -2144,7 +2229,6 @@ class _CardCreatorState extends State<_CardCreator>
                       ),
                     ],
                   ),
-
                   if (_selectedLayer >= 0 &&
                       _selectedLayer < _images.length) ...[
                     const SizedBox(height: 10),
@@ -2185,8 +2269,43 @@ class _CardCreatorState extends State<_CardCreator>
                       ],
                     ),
                   ],
+                  if (_selectedLayer >= 0 &&
+                      _selectedLayer < _images.length) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.zoom_in,
+                          color: Colors.white.withValues(alpha: 0.5),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Taille',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _images[_selectedLayer].scale.clamp(
+                              0.1,
+                              6.0,
+                            ),
+                            min: 0.1,
+                            max: 6.0,
+                            activeColor: const Color(0xFF7C3AED),
+                            onChanged:
+                                (v) => setState(
+                                  () => _images[_selectedLayer].scale = v,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 18),
-
                   OutlinedButton.icon(
                     onPressed: _addText,
                     icon: const Icon(
@@ -2208,7 +2327,6 @@ class _CardCreatorState extends State<_CardCreator>
                     ),
                   ),
                   const SizedBox(height: 18),
-
                   _secTitle('Fond'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -2269,7 +2387,6 @@ class _CardCreatorState extends State<_CardCreator>
                     ],
                   ),
                   const SizedBox(height: 18),
-
                   _secTitle('Couleur de bordure'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -2382,7 +2499,6 @@ class _CardCreatorState extends State<_CardCreator>
                     ),
                   ),
                 ],
-
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
