@@ -1,3 +1,8 @@
+// card_creator_screen.dart
+// FIX : canvas carte sorti du SingleChildScrollView → drag fonctionne sur mobile
+// FIX : onPanStart / onScaleStart ajouté à chaque élément draggable
+//       → remporte l'arène de gestes contre le scroll parent
+
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -429,7 +434,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ],
                       ).createShader(bounds),
                   blendMode: BlendMode.srcOver,
-                  child: Container(color: Colors.white.withValues(alpha:0.2)),
+                  child: Container(color: Colors.white24),
                 ),
               ),
               _buildSparkles(),
@@ -488,6 +493,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
+  // FIX : onPanStart / onScaleStart ajoutés à chaque élément draggable
+  // → remporte l'arène de gestes avant le ScrollView parent
   Widget _buildCardFront() {
     final rarityColor = Color(_rarityColorValue);
 
@@ -507,6 +514,9 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 left: _imageX,
                 top: _imageY,
                 child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // FIX : onScaleStart remporte l'arène
+                  onScaleStart: (_) {},
                   onScaleUpdate:
                       (d) => setState(() {
                         _imageX += d.focalPointDelta.dx;
@@ -528,10 +538,13 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 left: zone.x,
                 top: zone.y,
                 child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: () {
                     setState(() => _selectedTextZone = i);
                     _editTextZone(i);
                   },
+                  // FIX : onPanStart remporte l'arène
+                  onPanStart: (_) {},
                   onPanUpdate:
                       (d) => setState(() {
                         zone.x += d.delta.dx;
@@ -562,10 +575,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 ),
               );
             }),
+            // Nom draggable
             Positioned(
               left: _nameX,
               top: _nameY,
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                // FIX : onPanStart remporte l'arène
+                onPanStart: (_) {},
                 onPanUpdate:
                     (d) => setState(() {
                       _nameX += d.delta.dx;
@@ -582,10 +599,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 ),
               ),
             ),
+            // Rareté draggable
             Positioned(
               left: _rarityX,
               top: _rarityY,
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                // FIX : onPanStart remporte l'arène
+                onPanStart: (_) {},
                 onPanUpdate:
                     (d) => setState(() {
                       _rarityX += d.delta.dx;
@@ -778,11 +799,13 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
+      // FIX : body restructuré — canvas hors du scroll, paramètres dans Expanded
+      body: Column(
+        children: [
+          // Toggle recto/verso — hors du scroll
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 GestureDetector(
@@ -841,195 +864,215 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            _showBack ? _buildCardBack() : _buildCardFront(),
-            const SizedBox(height: 24),
-            if (!_showBack) ...[
-              TextField(
-                controller: _nameController,
-                onChanged: (_) => setState(() {}),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Nom de la carte',
-                  labelStyle: const TextStyle(color: Colors.white54),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white24),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Color(0xFF6C4AB6)),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildSectionLabel('Rareté'),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children:
-                    Rarity.values.map((r) {
-                      final colors = {
-                        Rarity.common: 0xFF9E9E9E,
-                        Rarity.uncommon: 0xFF4CAF50,
-                        Rarity.rare: 0xFF2196F3,
-                        Rarity.epic: 0xFF9C27B0,
-                        Rarity.legendary: 0xFFFFD700,
-                      };
-                      final names = {
-                        Rarity.common: 'Commun',
-                        Rarity.uncommon: 'Peu commun',
-                        Rarity.rare: 'Rare',
-                        Rarity.epic: 'Épique',
-                        Rarity.legendary: 'Légendaire',
-                      };
-                      return GestureDetector(
-                        onTap: () => setState(() => _rarity = r),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color:
-                                _rarity == r
-                                    ? Color(colors[r]!)
-                                    : Colors.transparent,
-                            border: Border.all(color: Color(colors[r]!)),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Text(
-                            names[r]!,
-                            style: TextStyle(
-                              color:
-                                  _rarity == r
-                                      ? Colors.white
-                                      : Color(colors[r]!),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-              const SizedBox(height: 16),
-              _buildSectionLabel('Effet'),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children:
-                    [CardEffect.none].map((e) {
-                      final names = {CardEffect.none: 'Normal'};
-                      return GestureDetector(
-                        onTap: () => setState(() => _effect = e),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color:
-                                _effect == e
-                                    ? const Color(0xFF6C4AB6)
-                                    : Colors.transparent,
-                            border: Border.all(color: const Color(0xFF6C4AB6)),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Text(
-                            names[e]!,
-                            style: TextStyle(
-                              color:
-                                  _effect == e
-                                      ? Colors.white
-                                      : const Color(0xFF6C4AB6),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-              const SizedBox(height: 24),
-              Row(
+          ),
+
+          // Canvas carte — hors du scroll → drag fonctionne correctement
+          Center(child: _showBack ? _buildCardBack() : _buildCardFront()),
+
+          const SizedBox(height: 8),
+
+          // Paramètres scrollables uniquement
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+              child: Column(
                 children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _pickImage(isBack: false),
+                  if (!_showBack) ...[
+                    TextField(
+                      controller: _nameController,
+                      onChanged: (_) => setState(() {}),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Nom de la carte',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: const BorderSide(color: Colors.white24),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: const BorderSide(
+                            color: Color(0xFF6C4AB6),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSectionLabel('Rareté'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children:
+                          Rarity.values.map((r) {
+                            final colors = {
+                              Rarity.common: 0xFF9E9E9E,
+                              Rarity.uncommon: 0xFF4CAF50,
+                              Rarity.rare: 0xFF2196F3,
+                              Rarity.epic: 0xFF9C27B0,
+                              Rarity.legendary: 0xFFFFD700,
+                            };
+                            final names = {
+                              Rarity.common: 'Commun',
+                              Rarity.uncommon: 'Peu commun',
+                              Rarity.rare: 'Rare',
+                              Rarity.epic: 'Épique',
+                              Rarity.legendary: 'Légendaire',
+                            };
+                            return GestureDetector(
+                              onTap: () => setState(() => _rarity = r),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      _rarity == r
+                                          ? Color(colors[r]!)
+                                          : Colors.transparent,
+                                  border: Border.all(color: Color(colors[r]!)),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  names[r]!,
+                                  style: TextStyle(
+                                    color:
+                                        _rarity == r
+                                            ? Colors.white
+                                            : Color(colors[r]!),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSectionLabel('Effet'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children:
+                          [CardEffect.none].map((e) {
+                            final names = {CardEffect.none: 'Normal'};
+                            return GestureDetector(
+                              onTap: () => setState(() => _effect = e),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      _effect == e
+                                          ? const Color(0xFF6C4AB6)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                    color: const Color(0xFF6C4AB6),
+                                  ),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  names[e]!,
+                                  style: TextStyle(
+                                    color:
+                                        _effect == e
+                                            ? Colors.white
+                                            : const Color(0xFF6C4AB6),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _pickImage(isBack: false),
+                            icon: const Icon(Icons.photo_library),
+                            label: const Text('Image recto'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16213E),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _addTextZone,
+                            icon: const Icon(Icons.text_fields),
+                            label: const Text('Ajouter texte'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16213E),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_hasImage) ...[
+                      const SizedBox(height: 16),
+                      _buildSectionLabel('Taille de l\'image'),
+                      Slider(
+                        value: _imageScale,
+                        min: 0.5,
+                        max: 2.0,
+                        activeColor: const Color(0xFF6C4AB6),
+                        onChanged: (v) => setState(() => _imageScale = v),
+                      ),
+                    ],
+                  ] else ...[
+                    _buildSectionLabel('Couleur de fond'),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children:
+                          _backColors.map((c) {
+                            return GestureDetector(
+                              onTap: () => setState(() => _backColor = c),
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: Color(c),
+                                  shape: BoxShape.circle,
+                                  border:
+                                      _backColor == c
+                                          ? Border.all(
+                                            color: Colors.white,
+                                            width: 3,
+                                          )
+                                          : Border.all(color: Colors.white24),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => _pickImage(isBack: true),
                       icon: const Icon(Icons.photo_library),
-                      label: const Text('Image recto'),
+                      label: const Text('Image verso'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF16213E),
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _addTextZone,
-                      icon: const Icon(Icons.text_fields),
-                      label: const Text('Ajouter texte'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF16213E),
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
+                  ],
                 ],
               ),
-              if (_hasImage) ...[
-                const SizedBox(height: 16),
-                _buildSectionLabel('Taille de l\'image'),
-                Slider(
-                  value: _imageScale,
-                  min: 0.5,
-                  max: 2.0,
-                  activeColor: const Color(0xFF6C4AB6),
-                  onChanged: (v) => setState(() => _imageScale = v),
-                ),
-              ],
-            ] else ...[
-              _buildSectionLabel('Couleur de fond'),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children:
-                    _backColors.map((c) {
-                      return GestureDetector(
-                        onTap: () => setState(() => _backColor = c),
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Color(c),
-                            shape: BoxShape.circle,
-                            border:
-                                _backColor == c
-                                    ? Border.all(color: Colors.white, width: 3)
-                                    : Border.all(color: Colors.white24),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => _pickImage(isBack: true),
-                icon: const Icon(Icons.photo_library),
-                label: const Text('Image verso'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF16213E),
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }

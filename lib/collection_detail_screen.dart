@@ -1,5 +1,7 @@
 ﻿// collection_detail_screen.dart
 // FEATURES : drag mobile, panneau couches, inspection 3D cartes collectées
+// FIX 1 : isolation des cartes par collection (_catalogue ne retourne plus _allCards)
+// FIX 2 : mode déplacement — glisse sur la carte pour bouger l'élément sélectionné
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -124,21 +126,23 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   void _startTimer() async {
     final r = await PackSystem.timeUntilNextPack(widget.collection.id);
     final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted)
+    if (mounted) {
       setState(() {
         _remaining = r;
         _canOpen = c;
       });
+    }
     if (!c) {
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
         final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
         final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted)
+        if (mounted) {
           setState(() {
             _remaining = r2;
             _canOpen = c2;
           });
+        }
         if (c2) _timer?.cancel();
       });
     }
@@ -185,8 +189,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     }
   }
 
+  // FIX 1 : ne plus retourner _allCards quand _catalogueIds est vide
+  // Avant : if (_catalogueIds.isEmpty) return _allCards;
+  // → les cartes d'autres collections se retrouvaient dans les packs
   List<SavedCard> get _catalogue {
-    if (_catalogueIds.isEmpty) return _allCards;
+    if (_catalogueIds.isEmpty) return [];
     return _allCards.where((c) => _catalogueIds.contains(c.id)).toList();
   }
 
@@ -236,8 +243,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   List<SavedCard> _sorted(List<SavedCard> cards) {
     final l = [...cards];
-    if (_sortBy == 'rarity')
+    if (_sortBy == 'rarity') {
       l.sort((a, b) => b.rarity.index.compareTo(a.rarity.index));
+    }
     if (_sortBy == 'name') l.sort((a, b) => a.name.compareTo(b.name));
     return l;
   }
@@ -567,7 +575,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     ),
   );
 
-  // ── Onglet Cartes — FEATURE 2 : inspection 3D ─────────────────────────────
   Widget _cardsTab() => Column(
     children: [
       Container(
@@ -694,7 +701,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TUILE CARTE — FEATURE 2 : inspection 3D au tap
+//   TUILE CARTE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CardTile extends StatelessWidget {
@@ -735,7 +742,6 @@ class _CardTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!revealed) return _back();
-    // FEATURE 2 : tap → inspection 3D
     return GestureDetector(
       onTap:
           () => Navigator.push(
@@ -759,7 +765,6 @@ class _CardTile extends StatelessWidget {
       child: Stack(
         children: [
           _front(),
-          // Badge "inspecter"
           Positioned(
             bottom: 4,
             left: 0,
@@ -918,7 +923,9 @@ class _ImgLayer {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   CRÉATEUR DE CARTE — FEATURE 1 : drag mobile + panneau couches
+//   CRÉATEUR DE CARTE
+// FIX 2 : _cardArea() intercepte les gestes quand une couche est sélectionnée
+//          → le scroll parent ne vole plus les drags
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CardCreator extends StatefulWidget {
@@ -954,8 +961,7 @@ class _CardCreatorState extends State<_CardCreator>
   int _backColor = 0xFF16213E;
   Uint8List? _backImageBytes;
 
-  // Personnalisation de la bordure
-  int _borderColorIndex = -1; // -1 = couleur rareté par défaut
+  int _borderColorIndex = -1;
   static const _borderColors = [
     Colors.white,
     Color(0xFFFFD700),
@@ -990,7 +996,6 @@ class _CardCreatorState extends State<_CardCreator>
     0xFF1A5276,
   ];
 
-  // Polices disponibles pour les textes
   static const _fontFamilies = [
     (null, 'Défaut'),
     ('serif', 'Serif'),
@@ -1060,8 +1065,7 @@ class _CardCreatorState extends State<_CardCreator>
         _backImageBytes = bytes;
       } else {
         _images.add(_ImgLayer(bytes: bytes));
-        _selectedLayer =
-            _images.length - 1; // auto-sélectionne la nouvelle couche
+        _selectedLayer = _images.length - 1;
       }
     });
   }
@@ -1128,7 +1132,6 @@ class _CardCreatorState extends State<_CardCreator>
                           },
                         ),
                         const SizedBox(height: 8),
-                        // Sélecteur de police
                         const Text(
                           'Police',
                           style: TextStyle(color: Colors.white70, fontSize: 13),
@@ -1285,7 +1288,6 @@ class _CardCreatorState extends State<_CardCreator>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
-          // Couches Nom et Rareté
           _layerChip(
             icon: const Icon(
               Icons.badge_rounded,
@@ -1314,7 +1316,6 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
             onDelete: null,
           ),
-          // Couches images
           for (var i = 0; i < _images.length; i++)
             _layerChip(
               icon: ClipRRect(
@@ -1338,7 +1339,6 @@ class _CardCreatorState extends State<_CardCreator>
                     _selectedLayer = -1;
                   }),
             ),
-          // Couches textes
           for (var i = 0; i < _textZones.length; i++)
             _layerChip(
               icon: const Icon(
@@ -1417,7 +1417,105 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
-  // ── Canvas carte (drag mobile fix : en dehors du scroll) ──────────────────
+  // ── FIX 2 : déplace l'élément sélectionné ─────────────────────────────────
+  void _moveSelectedLayer(Offset delta) {
+    if (_selectedLayer == -2) {
+      setState(() {
+        _nameX = (_nameX + delta.dx).clamp(0.0, _cW - 60);
+        _nameY = (_nameY + delta.dy).clamp(0.0, _cH - 20);
+      });
+    } else if (_selectedLayer == -3) {
+      setState(() {
+        _rarityX = (_rarityX + delta.dx).clamp(0.0, _cW - 60);
+        _rarityY = (_rarityY + delta.dy).clamp(0.0, _cH - 16);
+      });
+    } else if (_selectedLayer >= 0 && _selectedLayer < _images.length) {
+      final layer = _images[_selectedLayer];
+      setState(() {
+        layer.x = (layer.x + delta.dx).clamp(-_cW, _cW * 2);
+        layer.y = (layer.y + delta.dy).clamp(-_cH, _cH * 2);
+      });
+    }
+  }
+
+  // ── FIX 2 : zone carte avec interception de gestes ────────────────────────
+  // Quand une couche est sélectionnée via un chip :
+  //   • onPanStart: (_) {} → remporte l'arène de gestes contre le scroll parent
+  //   • onPanUpdate: _moveSelectedLayer → glisser n'importe où sur la carte
+  //     déplace l'élément sélectionné
+  Widget _cardArea() {
+    final card = _showBack ? _buildBack() : _buildFront();
+
+    if (_selectedLayer == -1 || _showBack) {
+      return Center(child: card);
+    }
+
+    final label =
+        _selectedLayer == -2
+            ? 'Nom'
+            : _selectedLayer == -3
+            ? 'Rareté'
+            : _selectedLayer >= 0 && _selectedLayer < _images.length
+            ? 'Photo ${_selectedLayer + 1}'
+            : 'Texte';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Bandeau mode déplacement
+        Container(
+          margin: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: const Color(0xFF7C3AED).withValues(alpha: 0.45),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.open_with_rounded,
+                color: Color(0xFF7C3AED),
+                size: 13,
+              ),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  '✋ Glisse sur la carte pour déplacer · $label sélectionné',
+                  style: const TextStyle(
+                    color: Color(0xFFB06EF3),
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              GestureDetector(
+                onTap: () => setState(() => _selectedLayer = -1),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Color(0xFF7C3AED),
+                  size: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Carte avec interception — onPanStart() gagne l'arène avant le scroll
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (_) {},
+          onPanUpdate: (d) => _moveSelectedLayer(d.delta),
+          child: Center(child: card),
+        ),
+      ],
+    );
+  }
+
+  // ── Canvas recto ──────────────────────────────────────────────────────────
   Widget _buildFront() {
     final rc = _currentBorderColor;
 
@@ -1457,6 +1555,8 @@ class _CardCreatorState extends State<_CardCreator>
                         () => setState(
                           () => _selectedLayer = isSelected ? -1 : i,
                         ),
+                    // FIX 2 : onScaleStart remporte l'arène contre le scroll
+                    onScaleStart: (_) {},
                     onScaleUpdate:
                         (d) => setState(() {
                           layer.x = (layer.x + d.focalPointDelta.dx).clamp(
@@ -1467,11 +1567,12 @@ class _CardCreatorState extends State<_CardCreator>
                             -_cH,
                             _cH * 2,
                           );
-                          if (d.scale != 1.0)
+                          if (d.scale != 1.0) {
                             layer.scale = (layer.scale * d.scale).clamp(
                               0.1,
                               6.0,
                             );
+                          }
                         }),
                     child: Stack(
                       children: [
@@ -1515,6 +1616,8 @@ class _CardCreatorState extends State<_CardCreator>
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => _editText(i),
+                    // FIX 2 : onPanStart remporte l'arène
+                    onPanStart: (_) {},
                     onPanUpdate:
                         (d) => setState(() {
                           zone.x = (zone.x + d.delta.dx).clamp(0, _cW - 20);
@@ -1562,7 +1665,7 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
               ),
 
-              // Nom (draggable — FIX MOBILE)
+              // Nom (draggable)
               Positioned(
                 left: _nameX,
                 top: _nameY,
@@ -1572,6 +1675,8 @@ class _CardCreatorState extends State<_CardCreator>
                       () => setState(
                         () => _selectedLayer = _selectedLayer == -2 ? -1 : -2,
                       ),
+                  // FIX 2 : onPanStart remporte l'arène
+                  onPanStart: (_) {},
                   onPanUpdate:
                       (d) => setState(() {
                         _nameX = (_nameX + d.delta.dx).clamp(0, _cW - 60);
@@ -1605,7 +1710,7 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
               ),
 
-              // Rareté (draggable — FIX MOBILE)
+              // Rareté (draggable)
               Positioned(
                 left: _rarityX,
                 top: _rarityY,
@@ -1615,6 +1720,8 @@ class _CardCreatorState extends State<_CardCreator>
                       () => setState(
                         () => _selectedLayer = _selectedLayer == -3 ? -1 : -3,
                       ),
+                  // FIX 2 : onPanStart remporte l'arène
+                  onPanStart: (_) {},
                   onPanUpdate:
                       (d) => setState(() {
                         _rarityX = (_rarityX + d.delta.dx).clamp(0, _cW - 60);
@@ -1835,7 +1942,7 @@ class _CardCreatorState extends State<_CardCreator>
     }
   }
 
-  // ── Build — FEATURE 1 : canvas EN DEHORS du scroll (fix drag mobile) ───────
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1861,8 +1968,9 @@ class _CardCreatorState extends State<_CardCreator>
           ),
         ),
 
-        // Canvas carte — en dehors du scroll → drag fonctionne sur mobile
-        Center(child: _showBack ? _buildBack() : _buildFront()),
+        // FIX 2 : _cardArea() au lieu de Center(child: ...) direct
+        // → intercepte les gestes quand une couche est sélectionnée
+        _cardArea(),
 
         // Bouton 3D inspect
         TextButton.icon(
@@ -1884,7 +1992,7 @@ class _CardCreatorState extends State<_CardCreator>
           ),
         ),
 
-        // Panneau couches — aussi en dehors du scroll
+        // Panneau couches
         if (!_showBack) _buildLayerPanel(),
 
         // Séparateur
@@ -1898,7 +2006,6 @@ class _CardCreatorState extends State<_CardCreator>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (!_showBack) ...[
-                  // Nom
                   TextField(
                     controller: _nameCtrl,
                     onChanged: (_) => setState(() {}),
@@ -1907,7 +2014,7 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '💡 Glisse le nom et la rareté directement sur la carte',
+                    '💡 Tape un chip pour sélectionner · glisse sur la carte pour déplacer',
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.3),
                       fontSize: 11,
@@ -1915,7 +2022,6 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                   const SizedBox(height: 18),
 
-                  // Rareté
                   _secTitle('Rareté'),
                   const SizedBox(height: 8),
                   ...Rarity.values.map((r) {
@@ -2010,7 +2116,6 @@ class _CardCreatorState extends State<_CardCreator>
                   }),
                   const SizedBox(height: 18),
 
-                  // Ajouter photo
                   Row(
                     children: [
                       Expanded(
@@ -2039,7 +2144,7 @@ class _CardCreatorState extends State<_CardCreator>
                       ),
                     ],
                   ),
-                  // Opacité si une image est sélectionnée
+
                   if (_selectedLayer >= 0 &&
                       _selectedLayer < _images.length) ...[
                     const SizedBox(height: 10),
@@ -2082,7 +2187,6 @@ class _CardCreatorState extends State<_CardCreator>
                   ],
                   const SizedBox(height: 18),
 
-                  // Ajouter texte
                   OutlinedButton.icon(
                     onPressed: _addText,
                     icon: const Icon(
@@ -2105,7 +2209,6 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                   const SizedBox(height: 18),
 
-                  // Fond dégradé
                   _secTitle('Fond'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -2167,14 +2270,12 @@ class _CardCreatorState extends State<_CardCreator>
                   ),
                   const SizedBox(height: 18),
 
-                  // Couleur de bordure personnalisée
                   _secTitle('Couleur de bordure'),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 10,
                     runSpacing: 8,
                     children: [
-                      // Option "couleur rareté"
                       GestureDetector(
                         onTap: () => setState(() => _borderColorIndex = -1),
                         child: Container(
@@ -2225,7 +2326,6 @@ class _CardCreatorState extends State<_CardCreator>
                     ],
                   ),
                 ] else ...[
-                  // Verso
                   _secTitle('Couleur de fond'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -2284,7 +2384,6 @@ class _CardCreatorState extends State<_CardCreator>
                 ],
 
                 const SizedBox(height: 24),
-                // Bouton sauvegarder
                 SizedBox(
                   width: double.infinity,
                   child: GestureDetector(

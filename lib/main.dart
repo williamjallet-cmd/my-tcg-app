@@ -67,7 +67,7 @@ class _AuthGateState extends State<_AuthGate> {
   }
 
   Future<void> _init() async {
-    // FIX AUTH : supabase_flutter v2 restaure la session dans initialize()
+    // supabase_flutter v2 restaure la session dans initialize()
     // On lit currentSession directement — pas besoin d'attendre initialSession
     final session = Supabase.instance.client.auth.currentSession;
     if (mounted) {
@@ -78,20 +78,35 @@ class _AuthGateState extends State<_AuthGate> {
     }
 
     // Écoute les changements ultérieurs (connexion / déconnexion)
-    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      if (!mounted) return;
-      switch (data.event) {
-        case AuthChangeEvent.signedIn:
-        case AuthChangeEvent.tokenRefreshed:
-          setState(() => _loggedIn = true);
-          break;
-        case AuthChangeEvent.signedOut:
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (data) {
+        if (!mounted) return;
+        switch (data.event) {
+          case AuthChangeEvent.signedIn:
+          case AuthChangeEvent.tokenRefreshed:
+            setState(() => _loggedIn = true);
+            break;
+          case AuthChangeEvent.signedOut:
+            setState(() => _loggedIn = false);
+            break;
+          default:
+            break;
+        }
+      },
+      // FIX : capture l'AuthRetryableFetchException (réseau coupé / token expiré)
+      // au lieu de laisser une exception non gérée crasher silencieusement l'app
+      onError: (Object error, StackTrace stack) {
+        if (!mounted) return;
+        debugPrint('Auth stream error (réseau/token) : $error');
+        // Token expiré + refresh impossible → déconnecter proprement
+        if (error is AuthException ||
+            error.toString().contains('AuthRetryableFetchException')) {
           setState(() => _loggedIn = false);
-          break;
-        default:
-          break;
-      }
-    });
+          // Déconnexion propre côté Supabase (ignore les erreurs réseau)
+          Supabase.instance.client.auth.signOut().catchError((_) {});
+        }
+      },
+    );
   }
 
   @override
