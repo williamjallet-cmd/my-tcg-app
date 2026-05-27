@@ -656,6 +656,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget _cardGrid() {
     final obtIds = _obtainedCards.map((c) => c.id).toSet();
     final cards = _sorted(_catalogue);
+    final isOwner = widget.collection.isOwnedBy(widget.myUserId);
     if (cards.isEmpty) {
       return Center(
         child: Column(
@@ -690,9 +691,63 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       ),
       itemCount: cards.length,
       itemBuilder:
-          (_, i) =>
-              _CardTile(card: cards[i], revealed: obtIds.contains(cards[i].id)),
+          (_, i) => _CardTile(
+            card: cards[i],
+            revealed: obtIds.contains(cards[i].id),
+            isAdmin: isOwner,
+            onDelete: isOwner ? () => _confirmDeleteCard(cards[i]) : null,
+          ),
     );
+  }
+
+  Future<void> _confirmDeleteCard(SavedCard card) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (_) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              'Supprimer la carte ?',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Text(
+              '« ${card.name} » sera retirée de la collection pour tous les membres.',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Annuler'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text(
+                  'Supprimer',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true) return;
+    try {
+      await CollectionService.instance.removeCardFromCollection(
+        widget.collection.id,
+        card.id,
+      );
+      await CardStorage.deleteCard(card.id);
+      _msg('🗑️ Carte supprimée.');
+      await _loadCards();
+    } catch (e) {
+      _msg('Erreur : $e', err: true);
+    }
   }
 
   Widget _createTab(List<Color> p) => _CardCreator(
@@ -714,7 +769,14 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 class _CardTile extends StatelessWidget {
   final SavedCard card;
   final bool revealed;
-  const _CardTile({required this.card, required this.revealed});
+  final bool isAdmin;
+  final VoidCallback? onDelete;
+  const _CardTile({
+    required this.card,
+    required this.revealed,
+    this.isAdmin = false,
+    this.onDelete,
+  });
 
   Color get _rc {
     switch (card.rarity) {
@@ -772,6 +834,7 @@ class _CardTile extends StatelessWidget {
       child: Stack(
         children: [
           _front(),
+          // Badge 3D
           Positioned(
             bottom: 4,
             left: 0,
@@ -805,6 +868,34 @@ class _CardTile extends StatelessWidget {
               ),
             ),
           ),
+          // Bouton suppression — admin uniquement
+          if (isAdmin && onDelete != null)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: onDelete,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 13,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1515,7 +1606,8 @@ class _CardCreatorState extends State<_CardCreator>
                     onTap:
                         () => setState(() {
                           _selectedLayer = _selectedLayer == i ? -1 : i;
-                          if (_selectedLayer != -1) _moveMode = true;
+                          _moveMode = _selectedLayer != -1;
+                          widget.onMoveModeChanged(_moveMode);
                         }),
                     child: Stack(
                       children: [
@@ -1561,7 +1653,8 @@ class _CardCreatorState extends State<_CardCreator>
                     onTap: () {
                       setState(() {
                         _selectedLayer = sel ? -1 : 100 + i;
-                        if (_selectedLayer != -1) _moveMode = true;
+                        _moveMode = _selectedLayer != -1;
+                        widget.onMoveModeChanged(_moveMode);
                       });
                       if (!sel) _editText(i);
                     },
@@ -1622,7 +1715,8 @@ class _CardCreatorState extends State<_CardCreator>
                   onTap:
                       () => setState(() {
                         _selectedLayer = _selectedLayer == -2 ? -1 : -2;
-                        if (_selectedLayer != -1) _moveMode = true;
+                        _moveMode = _selectedLayer != -1;
+                        widget.onMoveModeChanged(_moveMode);
                       }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1660,7 +1754,8 @@ class _CardCreatorState extends State<_CardCreator>
                   onTap:
                       () => setState(() {
                         _selectedLayer = _selectedLayer == -3 ? -1 : -3;
-                        if (_selectedLayer != -1) _moveMode = true;
+                        _moveMode = _selectedLayer != -1;
+                        widget.onMoveModeChanged(_moveMode);
                       }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
