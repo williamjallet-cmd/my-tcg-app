@@ -1,4 +1,5 @@
 // pack_opening_screen.dart
+// FIX DA point 5 : fond aligné avec le thème dark de l'app (#080814)
 // FIX : appel saveUserCards avant Navigator.pop + import CollectionService
 
 import 'dart:math' as math;
@@ -9,11 +10,7 @@ import 'package:flutter/services.dart';
 import 'card_model.dart';
 import 'card_storage.dart';
 import 'card_inspector_screen.dart';
-import 'collection_service.dart'; // FIX : import pour saveUserCards
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TYPES INTERNES
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+import 'collection_service.dart';
 
 enum _Phase { entering, idle, shaking, tearing, flying, revealing }
 
@@ -21,10 +18,6 @@ class _FlyData {
   final double dx, dy, rot;
   const _FlyData(this.dx, this.dy, this.rot);
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   ÉCRAN PRINCIPAL
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class PackOpeningScreen extends StatefulWidget {
   final List<SavedCard> cards;
@@ -49,8 +42,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   _Phase _phase = _Phase.entering;
   final _rng = math.Random();
   late final List<_FlyData> _flyData;
-
-  // FIX : état de sauvegarde pour feedback visuel
   bool _isSaving = false;
 
   late AnimationController _entryCtrl,
@@ -59,13 +50,11 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       _tearCtrl,
       _flyCtrl;
   late List<AnimationController> _flipCtrls;
-
   late Animation<double> _entryScale, _entryY;
   late Animation<double> _pulseScale, _glowIntensity;
   late Animation<double> _shakeX;
   late Animation<double> _flapAngle, _flashOpacity, _packFade;
   late List<Animation<double>> _flipAnims;
-
   late List<bool> _flipped;
 
   @override
@@ -180,27 +169,23 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     _shakeCtrl.dispose();
     _tearCtrl.dispose();
     _flyCtrl.dispose();
-    for (final c in _flipCtrls) { c.dispose(); }
+    for (final c in _flipCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
-
-  // ── Interactions ──────────────────────────────────────────────────────────
 
   Future<void> _openPack() async {
     if (_phase != _Phase.idle) return;
     HapticFeedback.mediumImpact();
-
     setState(() => _phase = _Phase.shaking);
     _pulseCtrl.stop();
     await _shakeCtrl.forward();
-
     HapticFeedback.heavyImpact();
     setState(() => _phase = _Phase.tearing);
     await _tearCtrl.forward();
-
     setState(() => _phase = _Phase.flying);
     await _flyCtrl.forward();
-
     setState(() => _phase = _Phase.revealing);
   }
 
@@ -232,7 +217,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     );
   }
 
-  // FIX : sauvegarde les cartes dans Supabase puis retourne à la collection
   Future<void> _saveAndReturn() async {
     setState(() => _isSaving = true);
     try {
@@ -241,8 +225,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
         widget.cards,
       );
     } catch (_) {
-      // Même si la sauvegarde échoue, on laisse l'utilisateur partir
-      // (la prochaine sync récupèrera l'état)
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -251,12 +233,11 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      // FIX DA point 5 : fond aligné avec le reste de l'app (plus de Colors.black pur)
+      backgroundColor: const Color(0xFF080814),
       body: Stack(
         children: [
           _background(),
@@ -274,10 +255,11 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       gradient: RadialGradient(
         radius: 1.5,
         colors: [
-          widget.packColor.withValues(alpha:
-            _phase == _Phase.revealing ? 0.50 : 0.18,
+          widget.packColor.withValues(
+            alpha: _phase == _Phase.revealing ? 0.40 : 0.14,
           ),
-          Colors.black,
+          // FIX DA : fond dark purple au lieu de Colors.black
+          const Color(0xFF080814),
         ],
       ),
     ),
@@ -306,10 +288,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       ),
     ),
   );
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //   PHASE PACK
-  // ══════════════════════════════════════════════════════════════════════════
 
   Widget _packLayout() {
     return LayoutBuilder(
@@ -346,7 +324,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
         double scale = _entryScale.value;
         double dx = 0.0, dy = _entryY.value;
         double flapAngle = 0.0, opacity = 1.0;
-
         switch (_phase) {
           case _Phase.idle:
             scale *= _pulseScale.value;
@@ -362,7 +339,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
           default:
             break;
         }
-
         return Opacity(
           opacity: opacity.clamp(0.0, 1.0),
           child: Transform.translate(
@@ -395,7 +371,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     return List.generate(n, (i) {
       final d = _flyData[i];
       final fx = rowLeft + i * (cw + sp) + cw / 2;
-
       return AnimatedBuilder(
         animation: _flyCtrl,
         builder: (_, __) {
@@ -446,7 +421,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
           Text(
             'Appuie pour ouvrir',
             style: TextStyle(
-              color: Colors.white.withValues(alpha:0.65),
+              color: Colors.white.withValues(alpha: 0.65),
               fontSize: 16,
               letterSpacing: 1.3,
               fontWeight: FontWeight.w300,
@@ -456,10 +431,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       ),
     ),
   );
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //   PHASE RÉVÉLATION
-  // ══════════════════════════════════════════════════════════════════════════
 
   Widget _revealLayout() {
     final allFlipped = _flipped.every((f) => f);
@@ -487,7 +458,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
             ),
           ),
         ),
-
         AnimatedOpacity(
           opacity: allFlipped ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 400),
@@ -501,7 +471,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                 Text(
                   'Appuie à nouveau sur une carte pour l\'inspecter',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha:0.38),
+                    color: Colors.white.withValues(alpha: 0.38),
                     fontSize: 12,
                   ),
                 ),
@@ -509,7 +479,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
             ),
           ),
         ),
-
         Expanded(
           child: Center(
             child: SingleChildScrollView(
@@ -550,42 +519,59 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
             ),
           ),
         ),
-
-        // FIX : bouton avec sauvegarde + indicateur de chargement
         AnimatedOpacity(
           opacity: allFlipped ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 600),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 40, top: 12),
-            child: ElevatedButton.icon(
-              onPressed: allFlipped && !_isSaving ? _saveAndReturn : null,
-              icon:
-                  _isSaving
-                      ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                      : const Icon(Icons.check_circle_outline),
-              label: Text(
-                _isSaving ? 'Sauvegarde...' : 'Retour à la collection',
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: widget.packColor,
-                foregroundColor: Colors.white,
+            child: GestureDetector(
+              onTap: allFlipped && !_isSaving ? _saveAndReturn : null,
+              child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 32,
                   vertical: 14,
                 ),
-                shape: RoundedRectangleBorder(
+                decoration: BoxDecoration(
+                  // FIX DA : bouton cohérent avec le thème violet/rose
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                  ),
                   borderRadius: BorderRadius.circular(30),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                textStyle: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _isSaving
+                        ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                        : const Icon(
+                          Icons.check_circle_outline,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                    const SizedBox(width: 10),
+                    Text(
+                      _isSaving ? 'Sauvegarde...' : 'Retour à la collection',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -635,7 +621,7 @@ class _PackVisual extends StatelessWidget {
                   borderRadius: BorderRadius.circular(kRadius),
                   boxShadow: [
                     BoxShadow(
-                      color: packColor.withValues(alpha:glowIntensity),
+                      color: packColor.withValues(alpha: glowIntensity),
                       blurRadius: 60,
                       spreadRadius: 20,
                     ),
@@ -677,7 +663,10 @@ class _PackVisual extends StatelessWidget {
           Colors.black87,
         ],
       ),
-      border: Border.all(color: Colors.white.withValues(alpha:0.13), width: 1.5),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.13),
+        width: 1.5,
+      ),
     ),
     child: ClipRRect(
       borderRadius: const BorderRadius.vertical(
@@ -701,7 +690,10 @@ class _PackVisual extends StatelessWidget {
         end: Alignment.bottomCenter,
         colors: [Color.lerp(packColor, Colors.white, 0.18)!, packColor],
       ),
-      border: Border.all(color: Colors.white.withValues(alpha:0.15), width: 1.5),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.15),
+        width: 1.5,
+      ),
     ),
   );
 
@@ -712,11 +704,11 @@ class _PackVisual extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha:0.07),
+            Colors.white.withValues(alpha: 0.07),
             Colors.transparent,
-            Colors.white.withValues(alpha:0.04),
+            Colors.white.withValues(alpha: 0.04),
             Colors.transparent,
-            Colors.white.withValues(alpha:0.08),
+            Colors.white.withValues(alpha: 0.08),
           ],
           stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
         ),
@@ -733,9 +725,9 @@ class _PackVisual extends StatelessWidget {
           height: 66,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha:0.07),
+            color: Colors.white.withValues(alpha: 0.07),
             border: Border.all(
-              color: Colors.white.withValues(alpha:0.22),
+              color: Colors.white.withValues(alpha: 0.22),
               width: 1.5,
             ),
           ),
@@ -757,13 +749,13 @@ class _PackVisual extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha:0.28)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
             'BOOSTER PACK',
             style: TextStyle(
-              color: Colors.white.withValues(alpha:0.55),
+              color: Colors.white.withValues(alpha: 0.55),
               fontSize: 9,
               letterSpacing: 2.8,
               fontWeight: FontWeight.w600,
@@ -785,7 +777,9 @@ class _PackVisual extends StatelessWidget {
           child: Container(
             height: 1.5,
             color:
-                i.isEven ? Colors.white.withValues(alpha:0.28) : Colors.transparent,
+                i.isEven
+                    ? Colors.white.withValues(alpha: 0.28)
+                    : Colors.transparent,
           ),
         ),
       ),
@@ -794,7 +788,7 @@ class _PackVisual extends StatelessWidget {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   DOS DE CARTE (animation de vol)
+//   DOS DE CARTE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CardBack extends StatelessWidget {
@@ -810,12 +804,15 @@ class _CardBack extends StatelessWidget {
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [packColor.withValues(alpha:0.9), Colors.black87],
+        colors: [packColor.withValues(alpha: 0.9), Colors.black87],
       ),
-      border: Border.all(color: Colors.white.withValues(alpha:0.2), width: 1.5),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.2),
+        width: 1.5,
+      ),
       boxShadow: [
         BoxShadow(
-          color: packColor.withValues(alpha:0.4),
+          color: packColor.withValues(alpha: 0.4),
           blurRadius: 14,
           spreadRadius: 1,
         ),
@@ -824,7 +821,7 @@ class _CardBack extends StatelessWidget {
     child: Center(
       child: Icon(
         Icons.auto_awesome,
-        color: Colors.white.withValues(alpha:0.35),
+        color: Colors.white.withValues(alpha: 0.35),
         size: 30,
       ),
     ),
@@ -857,7 +854,6 @@ class _FlippableCard extends StatefulWidget {
 class _FlippableCardState extends State<_FlippableCard>
     with SingleTickerProviderStateMixin {
   static const double kW = 120.0, kH = 170.0;
-
   AnimationController? _glowCtrl;
   Animation<double>? _glowRadius;
   bool _glowTriggered = false;
@@ -968,23 +964,25 @@ class _FlippableCardState extends State<_FlippableCard>
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha:0.12),
+                    color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white.withValues(alpha:0.2)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         Icons.search,
-                        color: Colors.white.withValues(alpha:0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                         size: 10,
                       ),
                       const SizedBox(width: 3),
                       Text(
                         'Inspecter',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha:0.6),
+                          color: Colors.white.withValues(alpha: 0.6),
                           fontSize: 8,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1012,7 +1010,7 @@ class _FlippableCardState extends State<_FlippableCard>
       border: Border.all(color: Colors.white24, width: 1.5),
       boxShadow: [
         BoxShadow(
-          color: widget.packColor.withValues(alpha:0.35),
+          color: widget.packColor.withValues(alpha: 0.35),
           blurRadius: 10,
           spreadRadius: 2,
         ),
@@ -1023,14 +1021,14 @@ class _FlippableCardState extends State<_FlippableCard>
       children: [
         Icon(
           Icons.auto_awesome,
-          color: Colors.white.withValues(alpha:0.45),
+          color: Colors.white.withValues(alpha: 0.45),
           size: 32,
         ),
         const SizedBox(height: 8),
         Text(
           '?',
           style: TextStyle(
-            color: Colors.white.withValues(alpha:0.5),
+            color: Colors.white.withValues(alpha: 0.5),
             fontSize: 30,
             fontWeight: FontWeight.bold,
           ),
@@ -1056,7 +1054,7 @@ class _FlippableCardState extends State<_FlippableCard>
                   borderRadius: BorderRadius.circular(12 + 30 * v),
                   boxShadow: [
                     BoxShadow(
-                      color: rc.withValues(alpha:(1 - v) * 0.9),
+                      color: rc.withValues(alpha: (1 - v) * 0.9),
                       blurRadius: 40 * v,
                       spreadRadius: 14 * v,
                     ),
@@ -1074,7 +1072,7 @@ class _FlippableCardState extends State<_FlippableCard>
             border: Border.all(color: rc, width: 2),
             boxShadow: [
               BoxShadow(
-                color: rc.withValues(alpha:0.5),
+                color: rc.withValues(alpha: 0.5),
                 blurRadius: 18,
                 spreadRadius: 3,
               ),
@@ -1097,7 +1095,7 @@ class _FlippableCardState extends State<_FlippableCard>
       gradient: LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [rc.withValues(alpha:0.14), Colors.black54],
+        colors: [rc.withValues(alpha: 0.14), Colors.black54],
       ),
     ),
     child:
@@ -1111,7 +1109,11 @@ class _FlippableCardState extends State<_FlippableCard>
   );
 
   Widget _defaultArt(Color rc) => Center(
-    child: Icon(Icons.auto_fix_high, color: rc.withValues(alpha:0.6), size: 38),
+    child: Icon(
+      Icons.auto_fix_high,
+      color: rc.withValues(alpha: 0.6),
+      size: 38,
+    ),
   );
 
   Widget _infoBar(Color rc) => Container(
@@ -1134,7 +1136,7 @@ class _FlippableCardState extends State<_FlippableCard>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           decoration: BoxDecoration(
-            color: rc.withValues(alpha:0.15),
+            color: rc.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Text(
@@ -1210,7 +1212,7 @@ class SavedCardFrontWidget extends StatelessWidget {
         border: Border.all(color: rc, width: 3),
         boxShadow: [
           BoxShadow(
-            color: rc.withValues(alpha:0.6),
+            color: rc.withValues(alpha: 0.6),
             blurRadius: 28,
             spreadRadius: 4,
           ),
@@ -1226,7 +1228,10 @@ class SavedCardFrontWidget extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [rc.withValues(alpha:0.18), const Color(0xFF0D0D1C)],
+                    colors: [
+                      rc.withValues(alpha: 0.18),
+                      const Color(0xFF0D0D1C),
+                    ],
                   ),
                 ),
               ),
@@ -1261,7 +1266,7 @@ class SavedCardFrontWidget extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withValues(alpha:0.92),
+                      Colors.black.withValues(alpha: 0.92),
                     ],
                   ),
                 ),
@@ -1286,9 +1291,11 @@ class SavedCardFrontWidget extends StatelessWidget {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: rc.withValues(alpha:0.2),
+                            color: rc.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: rc.withValues(alpha:0.5)),
+                            border: Border.all(
+                              color: rc.withValues(alpha: 0.5),
+                            ),
                           ),
                           child: Text(
                             _rarityName.toUpperCase(),
@@ -1308,16 +1315,16 @@ class SavedCardFrontWidget extends StatelessWidget {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha:0.08),
+                              color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: Colors.white.withValues(alpha:0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                               ),
                             ),
                             child: Text(
                               _effectName(card.effect),
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha:0.7),
+                                color: Colors.white.withValues(alpha: 0.7),
                                 fontSize: 9,
                                 letterSpacing: 0.5,
                               ),
@@ -1355,11 +1362,11 @@ class SavedCardFrontWidget extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Colors.white.withValues(alpha:0.06),
+                        Colors.white.withValues(alpha: 0.06),
                         Colors.transparent,
-                        Colors.white.withValues(alpha:0.03),
+                        Colors.white.withValues(alpha: 0.03),
                         Colors.transparent,
-                        Colors.white.withValues(alpha:0.07),
+                        Colors.white.withValues(alpha: 0.07),
                       ],
                       stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
                     ),
@@ -1408,10 +1415,13 @@ class SavedCardBackWidget extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: bg,
-        border: Border.all(color: Colors.white.withValues(alpha:0.15), width: 2),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+          width: 2,
+        ),
         boxShadow: [
           BoxShadow(
-            color: bg.withValues(alpha:0.5),
+            color: bg.withValues(alpha: 0.5),
             blurRadius: 24,
             spreadRadius: 2,
           ),
@@ -1437,11 +1447,11 @@ class SavedCardBackWidget extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Colors.white.withValues(alpha:0.08),
+                        Colors.white.withValues(alpha: 0.08),
                         Colors.transparent,
-                        Colors.white.withValues(alpha:0.04),
+                        Colors.white.withValues(alpha: 0.04),
                         Colors.transparent,
-                        Colors.white.withValues(alpha:0.09),
+                        Colors.white.withValues(alpha: 0.09),
                       ],
                       stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
                     ),
@@ -1453,7 +1463,7 @@ class SavedCardBackWidget extends StatelessWidget {
               Center(
                 child: Icon(
                   Icons.auto_awesome,
-                  color: Colors.white.withValues(alpha:0.25),
+                  color: Colors.white.withValues(alpha: 0.25),
                   size: 72,
                 ),
               ),

@@ -1,8 +1,10 @@
-// collections_screen.dart — FEATURE 3 : modifier la collection via les 3 points
+// collections_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'collection_detail_screen.dart';
@@ -178,7 +180,6 @@ class _CollectionsScreenState extends State<CollectionsScreen>
     }
   }
 
-  // FEATURE 3 : modifier la collection
   Future<void> _editCollection(CollectionModel col) async {
     final updated = await showModalBottomSheet<bool>(
       context: context,
@@ -383,7 +384,7 @@ class _CollectionsScreenState extends State<CollectionsScreen>
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TUILE COLLECTION — ajout onEdit
+//   TUILE COLLECTION
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CollectionCard extends StatefulWidget {
@@ -410,6 +411,10 @@ class _CollectionCardState extends State<_CollectionCard> {
   Duration _remaining = Duration.zero;
   bool _canOpen = false;
   Timer? _timer;
+  // AJOUT : compteurs membres + cartes
+  int _memberCount = 0;
+  int _totalCards = 0;
+  int _obtainedCards = 0;
 
   @override
   void initState() {
@@ -418,12 +423,31 @@ class _CollectionCardState extends State<_CollectionCard> {
   }
 
   Future<void> _refresh() async {
-    final r = await PackSystem.timeUntilNextPack(widget.collection.id);
-    final c = await PackSystem.canOpenPack(widget.collection.id);
+    final results = await Future.wait([
+      PackSystem.timeUntilNextPack(widget.collection.id),
+      PackSystem.canOpenPack(widget.collection.id),
+      CollectionService.instance.getMemberCount(widget.collection.id),
+      CollectionService.instance.getCollectionCardIds(widget.collection.id),
+    ]);
+
+    final r = results[0] as Duration;
+    final c = results[1] as bool;
+    final members = results[2] as int;
+    final cardIds = results[3] as List<String>;
+
+    final prefs = await SharedPreferences.getInstance();
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    final obtained =
+        (prefs.getStringList('obtained_${uid}_${widget.collection.id}') ?? [])
+            .length;
+
     if (mounted) {
       setState(() {
         _remaining = r;
         _canOpen = c;
+        _memberCount = members;
+        _totalCards = cardIds.length;
+        _obtainedCards = obtained;
       });
     }
     if (!c) {
@@ -431,12 +455,11 @@ class _CollectionCardState extends State<_CollectionCard> {
       _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
         final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
         final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted) {
+        if (mounted)
           setState(() {
             _remaining = r2;
             _canOpen = c2;
           });
-        }
         if (c2) _timer?.cancel();
       });
     }
@@ -457,7 +480,6 @@ class _CollectionCardState extends State<_CollectionCard> {
       onTap: widget.onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
-        height: 185,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           gradient: LinearGradient(
@@ -514,6 +536,7 @@ class _CollectionCardState extends State<_CollectionCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── Ligne titre + badges ──────────────────────────────────
                     Row(
                       children: [
                         Expanded(
@@ -545,20 +568,18 @@ class _CollectionCardState extends State<_CollectionCard> {
                         ),
                         Row(
                           children: [
-                            if (_isOwner)
-                              _badge(
-                                'Admin',
-                                Icons.shield_rounded,
-                                Colors.amber,
-                              ),
-                            const SizedBox(width: 6),
+                            // Badge ★ Admin (sans le "3h")
+                            if (_isOwner) ...[
+                              _badge('★ Admin', null, Colors.amber),
+                              const SizedBox(width: 6),
+                            ],
+                            // Badge membres
                             _badge(
-                              widget.collection.cooldownLabel,
-                              Icons.timer_rounded,
-                              Colors.white,
+                              '$_memberCount membre${_memberCount != 1 ? 's' : ''}',
+                              Icons.people_rounded,
+                              Colors.white54,
                             ),
                             const SizedBox(width: 6),
-                            // FEATURE 3 : menu mis à jour avec option "Modifier"
                             PopupMenuButton<String>(
                               color: const Color(0xFF1A1A2E),
                               icon: const Icon(
@@ -594,7 +615,6 @@ class _CollectionCardState extends State<_CollectionCard> {
                                         ],
                                       ),
                                     ),
-                                    // Option Modifier — uniquement pour le propriétaire
                                     if (_isOwner)
                                       const PopupMenuItem(
                                         value: 'edit',
@@ -642,11 +662,24 @@ class _CollectionCardState extends State<_CollectionCard> {
                         ),
                       ],
                     ),
+
                     const Spacer(),
+
+                    // ── Ligne bas : pack + code ───────────────────────────────
                     Row(
                       children: [
                         Expanded(
-                          child: _canOpen ? _availBadge() : _timerBadge(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _canOpen ? _availBadge() : _timerBadge(),
+                              // Barre de progression cartes x/x
+                              if (_totalCards > 0) ...[
+                                const SizedBox(height: 8),
+                                _cardProgressBar(),
+                              ],
+                            ],
+                          ),
                         ),
                         const SizedBox(width: 12),
                         GestureDetector(
@@ -689,7 +722,7 @@ class _CollectionCardState extends State<_CollectionCard> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -718,7 +751,8 @@ class _CollectionCardState extends State<_CollectionCard> {
     );
   }
 
-  Widget _badge(String label, IconData icon, Color color) => Container(
+  // Badge générique — icon optionnel (null = juste le texte avec l'étoile dedans)
+  Widget _badge(String label, IconData? icon, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: Colors.black.withValues(alpha: 0.3),
@@ -728,8 +762,10 @@ class _CollectionCardState extends State<_CollectionCard> {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: color, size: 11),
-        const SizedBox(width: 4),
+        if (icon != null) ...[
+          Icon(icon, color: color, size: 11),
+          const SizedBox(width: 4),
+        ],
         Text(
           label,
           style: TextStyle(
@@ -741,6 +777,41 @@ class _CollectionCardState extends State<_CollectionCard> {
       ],
     ),
   );
+
+  // Barre progression cartes collectées
+  Widget _cardProgressBar() {
+    final pct =
+        _totalCards > 0 ? (_obtainedCards / _totalCards).clamp(0.0, 1.0) : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.style_rounded, color: Colors.white38, size: 11),
+            const SizedBox(width: 4),
+            Text(
+              '$_obtainedCards / $_totalCards cartes',
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: pct,
+            minHeight: 4,
+            backgroundColor: Colors.white.withValues(alpha: 0.12),
+            valueColor: const AlwaysStoppedAnimation(Color(0xFF7C3AED)),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _availBadge() => Container(
     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
@@ -807,7 +878,7 @@ class _CollectionCardState extends State<_CollectionCard> {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   FEATURE 3 : MODIFIER COLLECTION (bottom sheet)
+//   MODIFIER COLLECTION
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _EditCollectionSheet extends StatefulWidget {
@@ -881,7 +952,6 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
           Container(
             width: 40,
             height: 4,
@@ -910,8 +980,6 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Image de couverture
           GestureDetector(
             onTap: _pickImage,
             child: Container(
@@ -974,8 +1042,6 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
             ),
           ),
           const SizedBox(height: 20),
-
-          // Cooldown
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -1049,8 +1115,6 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
                 }).toList(),
           ),
           const SizedBox(height: 16),
-
-          // Membres
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -1097,8 +1161,6 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
             ),
           ),
           const SizedBox(height: 20),
-
-          // Bouton sauvegarder
           SizedBox(
             width: double.infinity,
             child: GestureDetector(
@@ -1148,7 +1210,7 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   ÉCRAN CRÉER COLLECTION
+//   CRÉER COLLECTION
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _CreateCollectionScreen extends StatefulWidget {

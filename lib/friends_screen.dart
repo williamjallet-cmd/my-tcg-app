@@ -1,12 +1,10 @@
 // friends_screen.dart
-// ✦ Amis — liste, recherche, demandes, profil public ✦
-
+// Point 3 DA : écran vide plus engageant + 3e onglet Envoyées
 import 'package:flutter/material.dart';
 import 'profile_service.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
-
   @override
   State<FriendsScreen> createState() => _FriendsScreenState();
 }
@@ -14,7 +12,6 @@ class FriendsScreen extends StatefulWidget {
 class _FriendsScreenState extends State<FriendsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabCtrl;
-
   List<Friendship> _friends = [];
   List<Friendship> _pending = [];
   List<Friendship> _sent = [];
@@ -41,14 +38,13 @@ class _FriendsScreenState extends State<FriendsScreen>
         ProfileService.instance.getPendingRequests(),
         ProfileService.instance.getSentRequests(),
       ]);
-      if (mounted) {
+      if (mounted)
         setState(() {
           _friends = results[0];
           _pending = results[1];
           _sent = results[2];
           _loading = false;
         });
-      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -58,10 +54,7 @@ class _FriendsScreenState extends State<FriendsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0A0A1A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (_) => _SearchSheet(onAdded: _load),
     );
   }
@@ -69,58 +62,123 @@ class _FriendsScreenState extends State<FriendsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A1A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0A1A),
-        title: const Text(
-          'Amis',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add, color: Colors.white),
-            onPressed: _showSearch,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white38),
-            onPressed: _load,
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabCtrl,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white38,
-          indicatorColor: const Color(0xFF6C4AB6),
-          tabs: [
-            Tab(text: 'Amis (${_friends.length})'),
-            Tab(
-              text: _pending.isEmpty ? 'Reçues' : 'Reçues (${_pending.length})',
+      backgroundColor: const Color(0xFF080814),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Header ──────────────────────────────────────────────────────────
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF1A0533), Color(0xFF080814)],
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Amis',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 26,
+                        ),
+                      ),
+                      const Spacer(),
+                      // Bouton + dans le header
+                      GestureDetector(
+                        onTap: _showSearch,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.person_add_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // Tabs
+                  TabBar(
+                    controller: _tabCtrl,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white30,
+                    indicatorColor: const Color(0xFF7C3AED),
+                    indicatorWeight: 2,
+                    dividerColor: Colors.white.withValues(alpha: 0.06),
+                    tabs: [
+                      Tab(text: 'Amis (${_friends.length})'),
+                      Tab(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Reçues'),
+                            if (_pending.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDB2777),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${_pending.length}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const Tab(text: 'Envoyées'),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            Tab(text: 'Envoyées'),
+
+            // ── Corps ────────────────────────────────────────────────────────────
+            Expanded(
+              child:
+                  _loading
+                      ? const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF7C3AED),
+                        ),
+                      )
+                      : TabBarView(
+                        controller: _tabCtrl,
+                        children: [_friendsList(), _pendingList(), _sentList()],
+                      ),
+            ),
           ],
         ),
       ),
-      body:
-          _loading
-              ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFF6C4AB6)),
-              )
-              : TabBarView(
-                controller: _tabCtrl,
-                children: [_friendsList(), _pendingList(), _sentList()],
-              ),
     );
   }
 
-  // ── Onglet amis ───────────────────────────────────────────────────────────
   Widget _friendsList() {
-    if (_friends.isEmpty) {
-      return _emptyState(
-        Icons.people_outline,
-        'Aucun ami pour l\'instant',
-        'Ajoute des amis avec le bouton +',
-      );
-    }
+    if (_friends.isEmpty) return _emptyFriends();
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _friends.length,
@@ -137,15 +195,13 @@ class _FriendsScreenState extends State<FriendsScreen>
     );
   }
 
-  // ── Onglet demandes reçues ────────────────────────────────────────────────
   Widget _pendingList() {
-    if (_pending.isEmpty) {
-      return _emptyState(
+    if (_pending.isEmpty)
+      return _emptySimple(
         Icons.mark_email_read_outlined,
         'Aucune demande reçue',
-        '',
+        'Les demandes d\'amis apparaissent ici',
       );
-    }
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _pending.length,
@@ -166,11 +222,13 @@ class _FriendsScreenState extends State<FriendsScreen>
     );
   }
 
-  // ── Onglet demandes envoyées ──────────────────────────────────────────────
   Widget _sentList() {
-    if (_sent.isEmpty) {
-      return _emptyState(Icons.send_outlined, 'Aucune demande envoyée', '');
-    }
+    if (_sent.isEmpty)
+      return _emptySimple(
+        Icons.send_rounded,
+        'Aucune demande envoyée',
+        'Tes demandes en attente apparaissent ici',
+      );
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _sent.length,
@@ -185,38 +243,159 @@ class _FriendsScreenState extends State<FriendsScreen>
     );
   }
 
-  Widget _emptyState(IconData icon, String title, String sub) => Center(
+  // ── État vide amis — illustré et avec CTA ───────────────────────────────────
+  Widget _emptyFriends() => Padding(
+    padding: const EdgeInsets.all(24),
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(icon, size: 64, color: Colors.white.withValues(alpha:0.1)),
-        const SizedBox(height: 16),
+        // Illustration
+        Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                const Color(0xFF7C3AED).withValues(alpha: 0.2),
+                const Color(0xFF080814),
+              ],
+            ),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Cercles décoratifs
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF7C3AED).withValues(alpha: 0.15),
+                    width: 1,
+                  ),
+                ),
+              ),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF7C3AED).withValues(alpha: 0.25),
+                    width: 1,
+                  ),
+                ),
+              ),
+              // Icône centrale
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+                  ),
+                ),
+                child: const Icon(
+                  Icons.people_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Pas encore d\'amis',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Invite tes amis pour partager\ndes collections et ouvrir des packs ensemble !',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.4),
+            fontSize: 14,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 28),
+        // CTA
+        GestureDetector(
+          onTap: _showSearch,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.person_add_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 10),
+                Text(
+                  'Ajouter un ami',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  // État vide simple (pending / sent)
+  Widget _emptySimple(IconData icon, String title, String sub) => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 52, color: Colors.white.withValues(alpha: 0.1)),
+        const SizedBox(height: 14),
         Text(
           title,
           style: TextStyle(
-            color: Colors.white.withValues(alpha:0.4),
+            color: Colors.white.withValues(alpha: 0.4),
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
         ),
-        if (sub.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text(
-            sub,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha:0.25),
-              fontSize: 13,
-            ),
+        const SizedBox(height: 6),
+        Text(
+          sub,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.25),
+            fontSize: 13,
           ),
-        ],
+        ),
       ],
     ),
   );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TUILES
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━ TUILES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _FriendTile extends StatelessWidget {
   final Friendship friendship;
@@ -224,50 +403,51 @@ class _FriendTile extends StatelessWidget {
   const _FriendTile({required this.friendship, required this.onRemove});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFF16213E),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: _Avatar(profile: friendship.user),
+      title: Text(
+        friendship.user.displayName,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      subtitle: Text(
+        '@${friendship.user.username}',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.4),
+          fontSize: 12,
+        ),
+      ),
+      trailing: PopupMenuButton<String>(
         color: const Color(0xFF16213E),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: _Avatar(profile: friendship.user),
-        title: Text(
-          friendship.user.displayName,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        subtitle: Text(
-          '@${friendship.user.username}',
-          style: TextStyle(color: Colors.white.withValues(alpha:0.4), fontSize: 12),
-        ),
-        trailing: PopupMenuButton<String>(
-          color: const Color(0xFF16213E),
-          icon: Icon(Icons.more_vert, color: Colors.white.withValues(alpha:0.4)),
-          onSelected: (v) {
-            if (v == 'remove') onRemove();
-          },
-          itemBuilder:
-              (_) => [
-                const PopupMenuItem(
-                  value: 'remove',
-                  child: Row(
-                    children: [
-                      Icon(Icons.person_remove, color: Colors.red, size: 18),
-                      SizedBox(width: 10),
-                      Text('Retirer', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
+        icon: Icon(Icons.more_vert, color: Colors.white.withValues(alpha: 0.4)),
+        onSelected: (v) {
+          if (v == 'remove') onRemove();
+        },
+        itemBuilder:
+            (_) => [
+              const PopupMenuItem(
+                value: 'remove',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_remove, color: Colors.red, size: 18),
+                    SizedBox(width: 10),
+                    Text('Retirer', style: TextStyle(color: Colors.red)),
+                  ],
                 ),
-              ],
-        ),
+              ),
+            ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _PendingTile extends StatelessWidget {
@@ -281,52 +461,65 @@ class _PendingTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16213E),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF6C4AB6).withValues(alpha:0.3)),
-      ),
-      child: Row(
-        children: [
-          _Avatar(profile: friendship.user),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  friendship.user.displayName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFF16213E),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.3)),
+    ),
+    child: Row(
+      children: [
+        _Avatar(profile: friendship.user),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                friendship.user.displayName,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
-                Text(
-                  '@${friendship.user.username}',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha:0.4),
-                    fontSize: 12,
-                  ),
+              ),
+              Text(
+                '@${friendship.user.username}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.4),
+                  fontSize: 12,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.check_circle, color: Colors.green, size: 28),
-            onPressed: onAccept,
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
           ),
-          IconButton(
-            icon: Icon(Icons.cancel, color: Colors.red.shade300, size: 28),
+          child: IconButton(
+            icon: const Icon(Icons.close, color: Colors.red, size: 20),
             onPressed: onDecline,
           ),
-        ],
-      ),
-    );
-  }
+        ),
+        const SizedBox(width: 6),
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF7C3AED), Color(0xFF2563EB)],
+            ),
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.check, color: Colors.white, size: 20),
+            onPressed: onAccept,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _SentTile extends StatelessWidget {
@@ -335,36 +528,46 @@ class _SentTile extends StatelessWidget {
   const _SentTile({required this.friendship, required this.onCancel});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16213E),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: ListTile(
-        leading: _Avatar(profile: friendship.user),
-        title: Text(
-          friendship.user.displayName,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        subtitle: Text(
-          '@${friendship.user.username}',
-          style: TextStyle(color: Colors.white.withValues(alpha:0.4), fontSize: 12),
-        ),
-        trailing: TextButton(
-          onPressed: onCancel,
-          child: Text(
-            'Annuler',
-            style: TextStyle(color: Colors.red.shade300, fontSize: 12),
-          ),
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFF16213E),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: _Avatar(profile: friendship.user),
+      title: Text(
+        friendship.user.displayName,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
         ),
       ),
-    );
-  }
+      subtitle: Text(
+        '@${friendship.user.username}',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.4),
+          fontSize: 12,
+        ),
+      ),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Text(
+          'En attente',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.4),
+            fontSize: 11,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _Avatar extends StatelessWidget {
@@ -374,6 +577,14 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty) {
+      if (profile.avatarUrl!.startsWith('preset:')) {
+        final emoji = profile.avatarUrl!.replaceFirst('preset:', '');
+        return CircleAvatar(
+          radius: 22,
+          backgroundColor: const Color(0xFF7C3AED).withValues(alpha: 0.2),
+          child: Text(emoji, style: const TextStyle(fontSize: 22)),
+        );
+      }
       return CircleAvatar(
         radius: 22,
         backgroundImage: NetworkImage(profile.avatarUrl!),
@@ -381,7 +592,7 @@ class _Avatar extends StatelessWidget {
     }
     return CircleAvatar(
       radius: 22,
-      backgroundColor: const Color(0xFF6C4AB6).withValues(alpha:0.3),
+      backgroundColor: const Color(0xFF7C3AED).withValues(alpha: 0.3),
       child: Text(
         profile.displayName.isNotEmpty
             ? profile.displayName[0].toUpperCase()
@@ -396,14 +607,11 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   BOTTOM SHEET RECHERCHE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━ SEARCH SHEET ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _SearchSheet extends StatefulWidget {
   final VoidCallback onAdded;
   const _SearchSheet({required this.onAdded});
-
   @override
   State<_SearchSheet> createState() => _SearchSheetState();
 }
@@ -434,10 +642,9 @@ class _SearchSheetState extends State<_SearchSheet> {
     }
   }
 
-  Future<void> _addFriend(UserProfile user) async {
+  Future<void> _add(UserProfile user) async {
     try {
       await ProfileService.instance.sendFriendRequest(user.id);
-      if (!mounted) return;
       setState(() => _sent.add(user.id));
       widget.onAdded();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -447,7 +654,6 @@ class _SearchSheetState extends State<_SearchSheet> {
         ),
       );
     } catch (e) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade800),
       );
@@ -456,18 +662,22 @@ class _SearchSheetState extends State<_SearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return Container(
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
         left: 20,
         right: 20,
-        top: 20,
+        top: 16,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F0F1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 36,
+            width: 40,
             height: 4,
             decoration: BoxDecoration(
               color: Colors.white24,
@@ -491,10 +701,10 @@ class _SearchSheetState extends State<_SearchSheet> {
             onChanged: _search,
             decoration: InputDecoration(
               hintText: 'Rechercher par nom ou @username',
-              hintStyle: TextStyle(color: Colors.white.withValues(alpha:0.3)),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
               prefixIcon: const Icon(Icons.search, color: Colors.white38),
               filled: true,
-              fillColor: const Color(0xFF16213E),
+              fillColor: Colors.white.withValues(alpha: 0.06),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
@@ -502,7 +712,7 @@ class _SearchSheetState extends State<_SearchSheet> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: Color(0xFF6C4AB6),
+                  color: Color(0xFF7C3AED),
                   width: 1.5,
                 ),
               ),
@@ -512,7 +722,7 @@ class _SearchSheetState extends State<_SearchSheet> {
           if (_searching)
             const Padding(
               padding: EdgeInsets.all(20),
-              child: CircularProgressIndicator(color: Color(0xFF6C4AB6)),
+              child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
             )
           else
             ..._results.map(
@@ -528,17 +738,17 @@ class _SearchSheetState extends State<_SearchSheet> {
                 subtitle: Text(
                   '@${u.username}',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha:0.4),
+                    color: Colors.white.withValues(alpha: 0.4),
                     fontSize: 12,
                   ),
                 ),
                 trailing:
                     _sent.contains(u.id)
-                        ? const Icon(Icons.check, color: Colors.green)
+                        ? const Icon(Icons.check_circle, color: Colors.green)
                         : ElevatedButton(
-                          onPressed: () => _addFriend(u),
+                          onPressed: () => _add(u),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF6C4AB6),
+                            backgroundColor: const Color(0xFF7C3AED),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 14,
                               vertical: 8,
@@ -554,7 +764,7 @@ class _SearchSheetState extends State<_SearchSheet> {
                         ),
               ),
             ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
         ],
       ),
     );
