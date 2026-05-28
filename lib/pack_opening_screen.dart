@@ -1,8 +1,13 @@
 // pack_opening_screen.dart
-// FIX DA point 5 : fond aligné avec le thème dark de l'app (#080814)
-// FIX : appel saveUserCards avant Navigator.pop + import CollectionService
+// Pack foil coloré, rendu 3D (perspective + épaisseur + ombre) avec reflet
+// holographique animé en boucle. Le pack est personnalisable :
+//   - packImageBytes : petite image affichée à la place du rond, au-dessus du titre
+//   - packName       : le grand titre (ex. "BOOSTER")
+//   - packSubtitle   : le sous-titre (ex. "Pack surprise")
+// Toute la logique d'animation (6 phases, flip, sauvegarde) est inchangée.
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,12 +30,20 @@ class PackOpeningScreen extends StatefulWidget {
   final String packName;
   final Color packColor;
 
+  // ── Personnalisation du pack ──────────────────────────────────────────────
+  final Uint8List? packImageBytes; // image centrale en mémoire (aperçu live)
+  final String? packImageUrl; // image centrale depuis Supabase (URL publique)
+  final String packSubtitle; // sous-titre sous le titre
+
   const PackOpeningScreen({
     super.key,
     required this.cards,
     required this.collectionId,
-    this.packName = 'Booster Pack',
-    this.packColor = const Color(0xFF6C3FC5),
+    this.packName = 'Booster',
+    this.packColor = const Color(0xFF8A4DFF),
+    this.packImageBytes,
+    this.packImageUrl,
+    this.packSubtitle = 'Pack surprise',
   });
 
   @override
@@ -46,6 +59,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
 
   late AnimationController _entryCtrl,
       _pulseCtrl,
+      _shimmerCtrl,
       _shakeCtrl,
       _tearCtrl,
       _flyCtrl;
@@ -95,12 +109,18 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     )..repeat(reverse: true);
     _pulseScale = Tween<double>(
       begin: 1.0,
-      end: 1.065,
+      end: 1.055,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     _glowIntensity = Tween<double>(
-      begin: 0.22,
-      end: 0.78,
+      begin: 0.25,
+      end: 0.8,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+
+    // Reflet holographique qui balaie le pack en boucle.
+    _shimmerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
 
     _shakeCtrl = AnimationController(
       vsync: this,
@@ -118,7 +138,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       vsync: this,
       duration: const Duration(milliseconds: 720),
     );
-    _flapAngle = Tween<double>(begin: 0.0, end: -math.pi * 0.63).animate(
+    _flapAngle = Tween<double>(begin: 0.0, end: -math.pi * 0.78).animate(
       CurvedAnimation(
         parent: _tearCtrl,
         curve: const Interval(0.0, 0.55, curve: Curves.easeIn),
@@ -166,6 +186,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   void dispose() {
     _entryCtrl.dispose();
     _pulseCtrl.dispose();
+    _shimmerCtrl.dispose();
     _shakeCtrl.dispose();
     _tearCtrl.dispose();
     _flyCtrl.dispose();
@@ -236,7 +257,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // FIX DA point 5 : fond aligné avec le reste de l'app (plus de Colors.black pur)
       backgroundColor: const Color(0xFF080814),
       body: Stack(
         children: [
@@ -256,9 +276,8 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
         radius: 1.5,
         colors: [
           widget.packColor.withValues(
-            alpha: _phase == _Phase.revealing ? 0.40 : 0.14,
+            alpha: _phase == _Phase.revealing ? 0.40 : 0.16,
           ),
-          // FIX DA : fond dark purple au lieu de Colors.black
           const Color(0xFF080814),
         ],
       ),
@@ -300,7 +319,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _animatedPack(),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 20),
                   _tapHint(),
                 ],
               ),
@@ -317,6 +336,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
       animation: Listenable.merge([
         _entryCtrl,
         _pulseCtrl,
+        _shimmerCtrl,
         _shakeCtrl,
         _tearCtrl,
       ]),
@@ -347,9 +367,14 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
               scale: scale.clamp(0.0, 1.25),
               child: _PackVisual(
                 packName: widget.packName,
+                packSubtitle: widget.packSubtitle,
                 packColor: widget.packColor,
+                packImageBytes: widget.packImageBytes,
+                packImageUrl: widget.packImageUrl,
+                bottomLabel: '${widget.cards.length} cartes',
                 flapAngle: flapAngle,
                 glowIntensity: _phase == _Phase.idle ? _glowIntensity.value : 0,
+                shimmer: _shimmerCtrl.value,
                 onTap: _openPack,
               ),
             ),
@@ -532,7 +557,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                   vertical: 14,
                 ),
                 decoration: BoxDecoration(
-                  // FIX DA : bouton cohérent avec le thème violet/rose
                   gradient: const LinearGradient(
                     colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
                   ),
@@ -583,208 +607,491 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   VISUEL DU PACK
+//   VISUEL DU PACK — foil coloré 3D avec reflet animé
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class _PackVisual extends StatelessWidget {
   final String packName;
+  final String packSubtitle;
   final Color packColor;
+  final Uint8List? packImageBytes;
+  final String? packImageUrl;
+  final String bottomLabel;
   final double flapAngle;
   final double glowIntensity;
+  final double shimmer; // 0..1, balayage du reflet
   final VoidCallback onTap;
 
   const _PackVisual({
     required this.packName,
+    required this.packSubtitle,
     required this.packColor,
+    required this.packImageBytes,
+    required this.packImageUrl,
+    required this.bottomLabel,
     required this.flapAngle,
     required this.glowIntensity,
+    required this.shimmer,
     required this.onTap,
   });
 
-  static const double kW = 182.0, kH = 286.0, kFlapH = 54.0, kRadius = 16.0;
+  static const double kW = 184.0;
+  static const double kH = 300.0;
+  static const double kSeal = 46.0;
+  static const double kRadius = 18.0;
+
+  // Couleurs du foil holographique (modifiables pour changer l'ambiance).
+  static const List<Color> _foil = [
+    Color(0xFFFFE24D),
+    Color(0xFFFF7A3D),
+    Color(0xFFFF3D8F),
+    Color(0xFFC23DFF),
+    Color(0xFF6A3DF2),
+    Color(0xFF2F7AFF),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: kW + 50,
-        height: kH + 50,
-        child: Stack(
+        width: kW + 70,
+        height: kH + 70,
+        child: Transform(
           alignment: Alignment.center,
-          children: [
-            if (glowIntensity > 0)
-              Container(
-                width: kW,
-                height: kH,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(kRadius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: packColor.withValues(alpha: glowIntensity),
-                      blurRadius: 60,
-                      spreadRadius: 20,
+          // Léger basculement 3D (perspective + rotation).
+          transform:
+              Matrix4.identity()
+                ..setEntry(3, 2, 0.0012)
+                ..rotateY(-0.11)
+                ..rotateX(0.05),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (glowIntensity > 0) Positioned(top: kSeal + 2, child: _glow()),
+              // Tranche / épaisseur (côté droit qui s'enfonce).
+              Positioned(
+                top: kSeal + 8,
+                child: Transform.translate(
+                  offset: const Offset(10, 0),
+                  child: Container(
+                    width: kW,
+                    height: kH - kSeal - 8,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(kRadius),
+                      color: const Color(0xFF2A0D52),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            Positioned(top: kFlapH + 4, child: _body()),
-            Positioned(
-              top: 20,
-              child: Transform(
-                alignment: Alignment.topCenter,
-                transform:
-                    Matrix4.identity()
-                      ..setEntry(3, 2, 0.001)
-                      ..rotateX(flapAngle),
-                child: _topFlap(),
+              Positioned(top: kSeal + 2, child: _body()),
+              // Soudure crantée (le rabat qui se déchire).
+              Positioned(
+                top: 18,
+                child: Transform(
+                  alignment: Alignment.topCenter,
+                  transform:
+                      Matrix4.identity()
+                        ..setEntry(3, 2, 0.001)
+                        ..rotateX(flapAngle),
+                  child: _seal(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _body() => Container(
+  Widget _glow() => Container(
     width: kW,
-    height: kH - kFlapH,
+    height: kH - kSeal,
     decoration: BoxDecoration(
-      borderRadius: const BorderRadius.vertical(
-        bottom: Radius.circular(kRadius),
-        top: Radius.circular(3),
-      ),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          packColor,
-          Color.lerp(packColor, Colors.black, 0.42)!,
-          Colors.black87,
-        ],
-      ),
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.13),
-        width: 1.5,
-      ),
-    ),
-    child: ClipRRect(
-      borderRadius: const BorderRadius.vertical(
-        bottom: Radius.circular(kRadius),
-        top: Radius.circular(3),
-      ),
-      child: Stack(children: [_holoShimmer(), _bodyContent(), _tearDotLine()]),
-    ),
-  );
-
-  Widget _topFlap() => Container(
-    width: kW,
-    height: kFlapH + 6,
-    decoration: BoxDecoration(
-      borderRadius: const BorderRadius.vertical(
-        top: Radius.circular(kRadius),
-        bottom: Radius.circular(3),
-      ),
-      gradient: LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color.lerp(packColor, Colors.white, 0.18)!, packColor],
-      ),
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.15),
-        width: 1.5,
-      ),
-    ),
-  );
-
-  Widget _holoShimmer() => Positioned.fill(
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: 0.07),
-            Colors.transparent,
-            Colors.white.withValues(alpha: 0.04),
-            Colors.transparent,
-            Colors.white.withValues(alpha: 0.08),
-          ],
-          stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
-        ),
-      ),
-    ),
-  );
-
-  Widget _bodyContent() => Center(
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
-          width: 66,
-          height: 66,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha: 0.07),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.22),
-              width: 1.5,
-            ),
-          ),
-          child: const Icon(Icons.auto_awesome, color: Colors.white, size: 36),
-        ),
-        const SizedBox(height: 18),
-        Text(
-          packName,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2.2,
-            shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
-          ),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            'BOOSTER PACK',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.55),
-              fontSize: 9,
-              letterSpacing: 2.8,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+      borderRadius: BorderRadius.circular(kRadius),
+      boxShadow: [
+        BoxShadow(
+          color: packColor.withValues(alpha: glowIntensity),
+          blurRadius: 65,
+          spreadRadius: 18,
         ),
       ],
     ),
   );
 
-  Widget _tearDotLine() => Positioned(
-    top: 3,
-    left: 0,
-    right: 0,
-    child: Row(
-      children: List.generate(
-        32,
-        (i) => Expanded(
-          child: Container(
-            height: 1.5,
-            color:
-                i.isEven
-                    ? Colors.white.withValues(alpha: 0.28)
-                    : Colors.transparent,
+  Widget _body() {
+    final bodyH = kH - kSeal;
+    return Container(
+      width: kW,
+      height: bodyH,
+      decoration: BoxDecoration(
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(kRadius),
+          top: Radius.circular(4),
+        ),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: _foil,
+          stops: [0.0, 0.22, 0.45, 0.68, 0.85, 1.0],
+        ),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 22,
+            offset: const Offset(5, 12),
           ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(kRadius),
+          top: Radius.circular(4),
+        ),
+        child: Stack(
+          children: [_holoTint(), _movingSheen(bodyH), _bodyContent()],
+        ),
+      ),
+    );
+  }
+
+  // Teinte holographique légère et fixe (donne la profondeur de couleur).
+  Widget _holoTint() => Positioned.fill(
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            const Color(0xFF00E5FF).withValues(alpha: 0.10),
+            const Color(0xFFFF00E1).withValues(alpha: 0.08),
+            const Color(0xFFA6FF00).withValues(alpha: 0.10),
+            const Color(0xFF00E5FF).withValues(alpha: 0.10),
+          ],
         ),
       ),
     ),
   );
+
+  // Reflet brillant qui balaie le pack en diagonale, en boucle.
+  Widget _movingSheen(double bodyH) {
+    final dx = shimmer * (kW * 2.4) - kW * 0.9;
+    return Positioned.fill(
+      child: ClipRect(
+        child: Transform.translate(
+          offset: Offset(dx, 0),
+          child: Transform.rotate(
+            angle: -0.42,
+            alignment: Alignment.topLeft,
+            child: Container(
+              width: kW * 0.42,
+              height: bodyH * 2.2,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.0),
+                    Colors.white.withValues(alpha: 0.5),
+                    Colors.white.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bodyContent() => Stack(
+    children: [
+      Positioned(left: 18, top: 26, child: _sparkle(13)),
+      Positioned(right: 24, top: 44, child: _sparkle(17)),
+      Positioned(right: 28, bottom: 70, child: _sparkle(11)),
+      Positioned(left: 26, bottom: 56, child: _sparkle(14)),
+      Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _emblem(),
+              const SizedBox(height: 16),
+              Text(
+                packName.toUpperCase(),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                  shadows: [Shadow(blurRadius: 8, color: Colors.black45)],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                packSubtitle.toUpperCase(),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _energyPills(),
+            ],
+          ),
+        ),
+      ),
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 16,
+        child: Center(child: _bottomChip()),
+      ),
+      Positioned(
+        left: 0,
+        right: 0,
+        top: 2,
+        child: Container(
+          height: 1.5,
+          color: Colors.black.withValues(alpha: 0.22),
+        ),
+      ),
+    ],
+  );
+
+  Widget _emblem() {
+    const d = 74.0;
+    Widget? img;
+    if (packImageBytes != null) {
+      img = Image.memory(
+        packImageBytes!,
+        width: d,
+        height: d,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _defaultEmblem(d),
+      );
+    } else if (packImageUrl != null && packImageUrl!.isNotEmpty) {
+      img = Image.network(
+        packImageUrl!,
+        width: d,
+        height: d,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _defaultEmblem(d),
+      );
+    }
+    if (img == null) return _defaultEmblem(d);
+    return Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 10),
+        ],
+      ),
+      child: ClipOval(child: img),
+    );
+  }
+
+  Widget _defaultEmblem(double d) => Container(
+    width: d,
+    height: d,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: Colors.white.withValues(alpha: 0.95),
+      border: Border.all(
+        color: const Color(0xFFFF2E8A).withValues(alpha: 0.5),
+        width: 2,
+      ),
+    ),
+    child: const Center(
+      child: Icon(Icons.auto_awesome, color: Color(0xFFFF2E8A), size: 38),
+    ),
+  );
+
+  Widget _sparkle(double size) => Icon(
+    Icons.auto_awesome,
+    color: Colors.white.withValues(alpha: 0.9),
+    size: size,
+  );
+
+  Widget _energyPills() {
+    Widget dot(Color c) => Container(
+      width: 13,
+      height: 13,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: c,
+        border: Border.all(color: Colors.white, width: 1.5),
+      ),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot(const Color(0xFFFFD33D)),
+        const SizedBox(width: 10),
+        dot(const Color(0xFFFF4D9D)),
+        const SizedBox(width: 10),
+        dot(const Color(0xFF3DA5FF)),
+      ],
+    );
+  }
+
+  Widget _bottomChip() => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.3),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      bottomLabel.toUpperCase(),
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.0,
+      ),
+    ),
+  );
+
+  // Bande de soudure crantée en haut.
+  Widget _seal() => Container(
+    width: kW,
+    height: kSeal + 6,
+    decoration: BoxDecoration(
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(kRadius),
+        bottom: Radius.circular(4),
+      ),
+      gradient: const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFFFFE76B), Color(0xFFFF8A4D)],
+      ),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.45),
+        width: 1.5,
+      ),
+    ),
+    child: ClipRRect(
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(kRadius),
+        bottom: Radius.circular(4),
+      ),
+      child: CustomPaint(size: Size(kW, kSeal + 6), painter: _CrimpPainter()),
+    ),
+  );
+}
+
+// Dessine les fines stries verticales (crantage) de la soudure.
+class _CrimpPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final light =
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.4)
+          ..strokeWidth = 1;
+    final dark =
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.16)
+          ..strokeWidth = 1;
+    for (double x = 4; x < size.width; x += 7) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), light);
+      canvas.drawLine(Offset(x + 3.5, 0), Offset(x + 3.5, size.height), dark);
+    }
+    final seam =
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.3)
+          ..strokeWidth = 1.5;
+    canvas.drawLine(
+      Offset(0, size.height - 2),
+      Offset(size.width, size.height - 2),
+      seam,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CrimpPainter oldDelegate) => false;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   APERÇU DU PACK (pour l'écran de personnalisation admin)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class PackPreview extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final Uint8List? imageBytes;
+  final String? imageUrl;
+  final Color color;
+  final int cardCount;
+
+  const PackPreview({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    this.imageBytes,
+    this.imageUrl,
+    this.color = const Color(0xFF8A4DFF),
+    this.cardCount = 3,
+  });
+
+  @override
+  State<PackPreview> createState() => _PackPreviewState();
+}
+
+class _PackPreviewState extends State<PackPreview>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmer;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmer = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shimmer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _shimmer,
+      builder:
+          (_, __) => _PackVisual(
+            packName: widget.title.trim().isEmpty ? 'Booster' : widget.title,
+            packSubtitle: widget.subtitle,
+            packColor: widget.color,
+            packImageBytes: widget.imageBytes,
+            packImageUrl: widget.imageUrl,
+            bottomLabel: '${widget.cardCount} cartes',
+            flapAngle: 0,
+            glowIntensity: 0.5,
+            shimmer: _shimmer.value,
+            onTap: () {},
+          ),
+    );
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

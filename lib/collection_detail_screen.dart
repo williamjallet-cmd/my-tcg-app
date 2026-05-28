@@ -16,6 +16,7 @@ import 'card_storage.dart';
 import 'card_model.dart';
 import 'pack_opening_screen.dart';
 import 'card_inspector_screen.dart';
+import 'pack_customizer_screen.dart';
 
 const _dropRates = {
   Rarity.common: 50,
@@ -103,13 +104,54 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   String _sortBy = 'rarity';
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
   // TabBarView (gauche/droite) ET NestedScrollView (haut/bas)
-  bool _cardMoveMode = false;
+  bool _cardMoveMode =
+      false; // Reflète les modifs du pack faites par le proprio
+  CollectionModel? _editedCollection;
+  CollectionModel get _col => _editedCollection ?? widget.collection;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 3, vsync: this);
     _syncAndLoad();
+  }
+
+  Widget _customizePackBtn() => GestureDetector(
+    onTap: _openCustomizer,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+      ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.tune_rounded, color: Colors.white70, size: 18),
+          SizedBox(width: 8),
+          Text(
+            'Personnaliser le pack',
+            style: TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _openCustomizer() async {
+    final updated = await Navigator.push<CollectionModel>(
+      context,
+      MaterialPageRoute(builder: (_) => PackCustomizerScreen(collection: _col)),
+    );
+    if (updated != null && mounted) {
+      setState(() => _editedCollection = updated);
+    }
   }
 
   @override
@@ -219,9 +261,17 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         builder:
             (_) => PackOpeningScreen(
               cards: packCards,
-              collectionId: widget.collection.id,
-              packName: widget.collection.name,
-              packColor: _pal(widget.collection.id).first,
+              collectionId: _col.id,
+              packName:
+                  (_col.packTitle?.isNotEmpty ?? false)
+                      ? _col.packTitle!
+                      : _col.name,
+              packSubtitle:
+                  (_col.packSubtitle?.isNotEmpty ?? false)
+                      ? _col.packSubtitle!
+                      : 'Pack surprise',
+              packImageUrl: _col.packImageUrl,
+              packColor: _pal(_col.id).first,
             ),
       ),
     );
@@ -391,6 +441,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _canOpen ? _openBtn(p) : _timerWidget(),
+        if (_col.isOwnedBy(widget.myUserId)) ...[
+          const SizedBox(height: 12),
+          _customizePackBtn(),
+        ],
         const SizedBox(height: 28),
         _secTitle('Taux de drop'),
         const SizedBox(height: 12),

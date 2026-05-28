@@ -1,4 +1,5 @@
-// collection_service.dart — ajout de updateCollection
+// collection_service.dart — ajout de la personnalisation du pack
+//   (pack_title, pack_subtitle, pack_image_url) + uploadPackImage
 
 import 'dart:math';
 import 'dart:typed_data';
@@ -16,6 +17,11 @@ class CollectionModel {
   final int packCooldownHours;
   final bool membersCanAddCards;
 
+  // ── Personnalisation du pack ──────────────────────────────────────────────
+  final String? packTitle;
+  final String? packSubtitle;
+  final String? packImageUrl;
+
   const CollectionModel({
     required this.id,
     required this.name,
@@ -26,6 +32,9 @@ class CollectionModel {
     this.imageUrl,
     this.packCooldownHours = 3,
     this.membersCanAddCards = true,
+    this.packTitle,
+    this.packSubtitle,
+    this.packImageUrl,
   });
 
   factory CollectionModel.fromMap(Map<String, dynamic> m) => CollectionModel(
@@ -41,6 +50,9 @@ class CollectionModel {
     imageUrl: m['image_url'] as String?,
     packCooldownHours: (m['pack_cooldown_hours'] as int?) ?? 3,
     membersCanAddCards: (m['members_can_add_cards'] as bool?) ?? true,
+    packTitle: m['pack_title'] as String?,
+    packSubtitle: m['pack_subtitle'] as String?,
+    packImageUrl: m['pack_image_url'] as String?,
   );
 
   bool isOwnedBy(String userId) => ownerUserId == userId;
@@ -137,6 +149,26 @@ class CollectionService {
     }
   }
 
+  // Upload de l'image centrale du pack (réservé au proprio via updateCollection)
+  Future<String?> uploadPackImage(Uint8List bytes, String collectionId) async {
+    try {
+      final path = 'packs/$collectionId.jpg';
+      await _db.storage
+          .from('collections')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
+      return _db.storage.from('collections').getPublicUrl(path);
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<CollectionModel> createCollection({
     required String name,
     String description = '',
@@ -176,12 +208,16 @@ class CollectionService {
     return collection;
   }
 
-  // FIX FEATURE 3 : modification de la collection par le propriétaire
+  // Modification de la collection par le propriétaire
+  // (couverture, cooldown, permissions, ET personnalisation du pack)
   Future<CollectionModel> updateCollection({
     required String collectionId,
     Uint8List? imageBytes,
     int? packCooldownHours,
     bool? membersCanAddCards,
+    String? packTitle,
+    String? packSubtitle,
+    Uint8List? packImageBytes,
   }) async {
     final updates = <String, dynamic>{};
     if (packCooldownHours != null) {
@@ -190,12 +226,26 @@ class CollectionService {
     if (membersCanAddCards != null) {
       updates['members_can_add_cards'] = membersCanAddCards;
     }
+    if (packTitle != null) {
+      updates['pack_title'] = packTitle;
+    }
+    if (packSubtitle != null) {
+      updates['pack_subtitle'] = packSubtitle;
+    }
 
     if (imageBytes != null) {
       final url = await uploadCoverImage(imageBytes, collectionId);
       if (url != null) {
         final cacheBusted = '$url?t=${DateTime.now().millisecondsSinceEpoch}';
         updates['image_url'] = cacheBusted;
+      }
+    }
+
+    if (packImageBytes != null) {
+      final url = await uploadPackImage(packImageBytes, collectionId);
+      if (url != null) {
+        final cacheBusted = '$url?t=${DateTime.now().millisecondsSinceEpoch}';
+        updates['pack_image_url'] = cacheBusted;
       }
     }
 
