@@ -94,7 +94,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
 
   Future<void> _pickImage({bool isBack = false}) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 900,
+      imageQuality: 85,
+    );
     if (picked != null) {
       if (kIsWeb) {
         final bytes = await picked.readAsBytes();

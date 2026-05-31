@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'card_creator_screen.dart';
@@ -13,6 +15,269 @@ import 'auth_screen.dart';
 import 'profile_service.dart';
 import 'collection_service.dart';
 import 'secrets.dart';
+
+// ════════════════════════════════════════════════════════════════════════════
+//  THÈME RÉTRO-ARCADE PREMIUM (mêmes tokens que collection_detail_screen.dart)
+//  ⚠️ VISUEL UNIQUEMENT — toute la logique (auth, Supabase, presets…) intacte.
+//  ▶ Polices : nécessite `google_fonts` (flutter pub add google_fonts).
+//    Pour t'en passer : mets _kUseGoogleFonts = false.
+//  💡 Astuce : ces tokens sont dupliqués entre fichiers ; tu pourras plus tard
+//    les extraire dans un seul `arcade_theme.dart` partagé.
+// ════════════════════════════════════════════════════════════════════════════
+const _bg = Color(0xFF14101F);
+const _bgDeep = Color(0xFF0D0A16);
+const _surface = Color(0xFF211A33);
+const _gold = Color(0xFFFFC83D);
+const _goldDeep = Color(0xFFE0A91E);
+const _teal = Color(0xFF21E6C1);
+const _coral = Color(0xFFFF5D73);
+const _cream = Color(0xFFF6EEDD);
+
+final _creamDim = _cream.withValues(alpha: 0.62);
+final _creamFaint = _cream.withValues(alpha: 0.34);
+final _surfaceLine = _cream.withValues(alpha: 0.10);
+
+const bool _kUseGoogleFonts = true;
+
+TextStyle _arcade({
+  double size = 16,
+  Color color = _cream,
+  double letterSpacing = 0.5,
+  double? height,
+  List<Shadow>? shadows,
+}) {
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.lilitaOne(
+      fontSize: size,
+      color: color,
+      letterSpacing: letterSpacing,
+      height: height,
+      shadows: shadows,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: color,
+    fontWeight: FontWeight.w900,
+    letterSpacing: letterSpacing,
+    height: height,
+    shadows: shadows,
+  );
+}
+
+TextStyle _pixel({double size = 9, Color? color, double letterSpacing = 1}) {
+  final c = color ?? _creamFaint;
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.silkscreen(
+      fontSize: size,
+      color: c,
+      letterSpacing: letterSpacing,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: c,
+    fontFamily: 'monospace',
+    fontWeight: FontWeight.bold,
+    letterSpacing: letterSpacing,
+  );
+}
+
+TextStyle _body({
+  double size = 13,
+  Color? color,
+  FontWeight weight = FontWeight.w600,
+  double? height,
+}) {
+  final c = color ?? _cream;
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.plusJakartaSans(
+      fontSize: size,
+      color: c,
+      fontWeight: weight,
+      height: height,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: c,
+    fontWeight: weight,
+    height: height,
+  );
+}
+
+// ── Bouton arcade biseauté ──────────────────────────────────────────────────
+class _ArcadeButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  const _ArcadeButton({required this.child, this.onTap});
+
+  @override
+  State<_ArcadeButton> createState() => _ArcadeButtonState();
+}
+
+class _ArcadeButtonState extends State<_ArcadeButton> {
+  bool _down = false;
+  void _set(bool v) => setState(() => _down = v);
+
+  @override
+  Widget build(BuildContext context) {
+    final depth = _down ? 1.0 : 6.0;
+    return GestureDetector(
+      onTapDown: (_) => _set(true),
+      onTapCancel: () => _set(false),
+      onTapUp: (_) => _set(false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 70),
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(0, _down ? 5 : 0, 0),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color.lerp(_gold, Colors.white, 0.12)!, _gold, _goldDeep],
+            stops: const [0.0, 0.42, 1.0],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _goldDeep,
+              offset: Offset(0, depth),
+              blurRadius: 0,
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              offset: Offset(0, depth + 6),
+              blurRadius: 22,
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: 3,
+              left: 14,
+              right: 14,
+              child: IgnorePointer(
+                child: Container(
+                  height: 12,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.55),
+                        Colors.white.withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            DefaultTextStyle(
+              style: _arcade(size: 15.5, color: const Color(0xFF2A1C00)),
+              child: IconTheme(
+                data: const IconThemeData(color: Color(0xFF2A1C00), size: 20),
+                child: Center(child: widget.child),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GhostButton extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  const _GhostButton({required this.child, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 18),
+        decoration: BoxDecoration(
+          color: _cream.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _surfaceLine, width: 1.5),
+        ),
+        child: DefaultTextStyle(
+          style: _body(size: 14.5, color: _cream, weight: FontWeight.w700),
+          child: IconTheme(
+            data: IconThemeData(color: _creamDim, size: 18),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Rayons en éventail (statique) ───────────────────────────────────────────
+class _RayBurstPainter extends CustomPainter {
+  final Color color;
+  final double opacity;
+  _RayBurstPainter(this.color, this.opacity);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final radius = size.longestSide * 1.4;
+    final paint = Paint()..color = color.withValues(alpha: opacity);
+    const rays = 30;
+    for (int i = 0; i < rays; i++) {
+      final a0 = i * 2 * math.pi / rays;
+      final a1 = a0 + (math.pi / rays) * 0.55;
+      final path =
+          Path()
+            ..moveTo(c.dx, c.dy)
+            ..lineTo(c.dx + radius * math.cos(a0), c.dy + radius * math.sin(a0))
+            ..lineTo(c.dx + radius * math.cos(a1), c.dy + radius * math.sin(a1))
+            ..close();
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RayBurstPainter old) => false;
+}
+
+Widget _rayBurst(Color color, double opacity) => Positioned.fill(
+  child: IgnorePointer(
+    child: ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback:
+          (r) => const RadialGradient(
+            colors: [Colors.black, Colors.transparent],
+            stops: [0.0, 0.7],
+          ).createShader(r),
+      child: CustomPaint(painter: _RayBurstPainter(color, opacity)),
+    ),
+  ),
+);
+
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = Colors.black.withValues(alpha: 0.05);
+    for (double y = 0; y < size.height; y += 3) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, 1), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScanlinePainter old) => false;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,9 +299,10 @@ class TCGApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF7C3AED),
+          seedColor: _gold,
           brightness: Brightness.dark,
         ),
+        scaffoldBackgroundColor: _bgDeep,
         useMaterial3: true,
       ),
       home: const _AuthGate(),
@@ -114,10 +380,8 @@ class _AuthGateState extends State<_AuthGate> {
   Widget build(BuildContext context) {
     if (!_ready) {
       return const Scaffold(
-        backgroundColor: Color(0xFF080814),
-        body: Center(
-          child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
-        ),
+        backgroundColor: _bgDeep,
+        body: Center(child: CircularProgressIndicator(color: _gold)),
       );
     }
     return _loggedIn ? const MainScreen() : const AuthScreen();
@@ -132,7 +396,8 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-  final List<Widget> _screens = const [
+
+  static const List<Widget> _screens = [
     CollectionsScreen(),
     FriendsScreen(),
     ProfileScreen(),
@@ -166,13 +431,8 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0A0A16),
-        border: Border(
-          top: BorderSide(
-            color: Colors.white.withValues(alpha: 0.07),
-            width: 0.5,
-          ),
-        ),
+        color: _bgDeep,
+        border: Border(top: BorderSide(color: _surfaceLine, width: 1.5)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.5),
@@ -192,84 +452,63 @@ class _BottomNav extends StatelessWidget {
                 child: GestureDetector(
                   onTap: () => onTap(i),
                   behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOutCubic,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Pill indicator sous l'icône active
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: sel ? 32 : 0,
-                          height: 2,
-                          margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(
-                            gradient:
-                                sel
-                                    ? const LinearGradient(
-                                      colors: [
-                                        Color(0xFF7C3AED),
-                                        Color(0xFFDB2777),
-                                      ],
-                                    )
-                                    : null,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                        // Icône avec fond pill quand active
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color:
-                                sel
-                                    ? const Color(
-                                      0xFF7C3AED,
-                                    ).withValues(alpha: 0.12)
-                                    : Colors.transparent,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child:
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Indicateur biseauté or sous l'icône active
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: sel ? 32 : 0,
+                        height: 3,
+                        margin: const EdgeInsets.only(bottom: 6),
+                        decoration: BoxDecoration(
+                          gradient:
                               sel
-                                  ? ShaderMask(
-                                    shaderCallback:
-                                        (b) => const LinearGradient(
-                                          colors: [
-                                            Color(0xFF7C3AED),
-                                            Color(0xFFDB2777),
-                                          ],
-                                        ).createShader(b),
-                                    child: Icon(
-                                      item.$1,
-                                      color: Colors.white,
-                                      size: 22,
-                                    ),
+                                  ? const LinearGradient(
+                                    colors: [_gold, _goldDeep],
                                   )
-                                  : Icon(
-                                    item.$2,
-                                    color: Colors.white.withValues(alpha: 0.45),
-                                    size: 22,
-                                  ),
+                                  : null,
+                          borderRadius: BorderRadius.circular(2),
+                          boxShadow:
+                              sel
+                                  ? [
+                                    BoxShadow(
+                                      color: _gold.withValues(alpha: 0.5),
+                                      blurRadius: 8,
+                                    ),
+                                  ]
+                                  : [],
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          item.$3,
-                          style: TextStyle(
-                            color:
-                                sel
-                                    ? const Color(0xFFB06EF3)
-                                    : Colors.white.withValues(alpha: 0.4),
-                            fontSize: 10,
-                            fontWeight:
-                                sel ? FontWeight.w700 : FontWeight.normal,
-                          ),
+                      ),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 5,
                         ),
-                      ],
-                    ),
+                        decoration: BoxDecoration(
+                          color:
+                              sel
+                                  ? _gold.withValues(alpha: 0.14)
+                                  : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          sel ? item.$1 : item.$2,
+                          color: sel ? _gold : _creamFaint,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        item.$3,
+                        style: _body(
+                          size: 10,
+                          color: sel ? _gold : _creamFaint,
+                          weight: sel ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -281,6 +520,10 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+//  CollectionScreen — écran HÉRITÉ (non utilisé par MainScreen) : laissé tel
+//  quel, hors périmètre du reskin. Conserve son ancien style.
+// ════════════════════════════════════════════════════════════════════════════
 class CollectionScreen extends StatefulWidget {
   const CollectionScreen({super.key});
   @override
@@ -610,6 +853,9 @@ const _presetAvatars = [
   '🍀',
 ];
 
+// ════════════════════════════════════════════════════════════════════════════
+//  PROFIL — reskin arcade (logique intacte)
+// ════════════════════════════════════════════════════════════════════════════
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
   @override
@@ -632,18 +878,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final results = await Future.wait([
-      ProfileService.instance.getMyProfile(),
-      ProfileService.instance.getFriends(),
-      CollectionService.instance.getMyCollections(),
-      CardStorage.loadCards(),
-    ]);
+    final profile = await ProfileService.instance.getMyProfile();
+    final friends = await ProfileService.instance.getFriends();
+    final collections = await CollectionService.instance.getMyCollections();
+
+    // On ne compte que les cartes des collections encore existantes.
+    // Une collection supprimée disparaît de getMyCollections(), donc ses
+    // cartes ne sont plus comptées.
+    final cardIds = <String>{};
+    for (final col in collections) {
+      final ids = await CollectionService.instance.getCollectionCardIds(col.id);
+      cardIds.addAll(ids);
+    }
+
     if (mounted) {
       setState(() {
-        _profile = results[0] as UserProfile?;
-        _friendsCount = (results[1] as List).length;
-        _collectionsCount = (results[2] as List).length;
-        _cardsCount = (results[3] as List).length;
+        _profile = profile;
+        _friendsCount = friends.length;
+        _collectionsCount = collections.length;
+        _cardsCount = cardIds.length;
         _loading = false;
       });
     }
@@ -692,18 +945,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: cacheBustedUrl,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _profile = updated;
           _uploading = false;
         });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _uploading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur upload : $e'),
-            backgroundColor: Colors.red.shade800,
+            content: Text(
+              'Erreur upload : $e',
+              style: _body(color: Colors.white),
+            ),
+            backgroundColor: _coral,
           ),
         );
       }
@@ -717,11 +974,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final updated = await ProfileService.instance.updateProfile(
         avatarUrl: 'preset:$emoji',
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _profile = updated;
           _uploading = false;
         });
+      }
     } catch (_) {
       if (mounted) setState(() => _uploading = false);
     }
@@ -740,9 +998,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: Container(
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-              decoration: const BoxDecoration(
-                color: Color(0xFF0F0F1E),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              decoration: BoxDecoration(
+                color: _bg,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
+                border: Border.all(color: _surfaceLine, width: 1.5),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -751,75 +1012,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.white24,
+                      color: _creamFaint,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Modifier le nom',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  Text('Modifier le nom', style: _arcade(size: 18)),
                   const SizedBox(height: 20),
                   TextField(
                     controller: ctrl,
                     autofocus: true,
-                    style: const TextStyle(color: Colors.white),
+                    style: _body(color: _cream),
                     decoration: InputDecoration(
                       hintText: 'Ton prénom ou pseudo',
-                      hintStyle: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.3),
-                      ),
+                      hintStyle: _body(color: _creamFaint),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      fillColor: _cream.withValues(alpha: 0.06),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(
-                          color: Color(0xFF7C3AED),
-                          width: 1.5,
-                        ),
+                        borderSide: const BorderSide(color: _gold, width: 1.5),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: GestureDetector(
-                      onTap: () async {
-                        if (ctrl.text.trim().isEmpty) return;
-                        Navigator.pop(context);
-                        final updated = await ProfileService.instance
-                            .updateProfile(displayName: ctrl.text.trim());
-                        if (mounted) setState(() => _profile = updated);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'Enregistrer',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                  _ArcadeButton(
+                    onTap: () async {
+                      if (ctrl.text.trim().isEmpty) return;
+                      Navigator.pop(context);
+                      final updated = await ProfileService.instance
+                          .updateProfile(displayName: ctrl.text.trim());
+                      if (mounted) setState(() => _profile = updated);
+                    },
+                    child: const Text('ENREGISTRER'),
                   ),
                 ],
               ),
@@ -831,236 +1059,249 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF080814),
+      backgroundColor: _bgDeep,
       body:
           _loading
-              ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFF7C3AED)),
-              )
-              : CustomScrollView(
-                slivers: [
-                  // ── Hero header ──────────────────────────────────────────────
-                  SliverToBoxAdapter(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0xFF1A0533), Color(0xFF0D0D1A)],
-                        ),
-                      ),
-                      child: SafeArea(
-                        bottom: false,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                          child: Column(
-                            children: [
-                              // Avatar
-                              GestureDetector(
-                                onTap: _showAvatarPicker,
-                                child: Stack(
-                                  alignment: Alignment.bottomRight,
+              ? const Center(child: CircularProgressIndicator(color: _gold))
+              : Stack(
+                children: [
+                  CustomScrollView(
+                    slivers: [
+                      // ── Hero header ────────────────────────────────────────
+                      SliverToBoxAdapter(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomCenter,
+                                    colors: [Color(0xFF2A1E47), _bgDeep],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            _rayBurst(_gold, 0.07),
+                            SafeArea(
+                              bottom: false,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  16,
+                                  20,
+                                  24,
+                                ),
+                                child: Column(
                                   children: [
-                                    _uploading
-                                        ? Container(
-                                          width: 90,
-                                          height: 90,
-                                          decoration: const BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Color(0xFF7C3AED),
-                                                Color(0xFFDB2777),
+                                    // Avatar bagué or
+                                    GestureDetector(
+                                      onTap: _showAvatarPicker,
+                                      child: Stack(
+                                        alignment: Alignment.bottomRight,
+                                        children: [
+                                          _uploading
+                                              ? _avatarRing(
+                                                const Center(
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        color: _gold,
+                                                        strokeWidth: 2,
+                                                      ),
+                                                ),
+                                              )
+                                              : _buildAvatarWidget(),
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                colors: [_gold, _goldDeep],
+                                              ),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: _bgDeep,
+                                                width: 2,
+                                              ),
+                                            ),
+                                            child: const Icon(
+                                              Icons.edit_rounded,
+                                              color: Color(0xFF2A1C00),
+                                              size: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    // Nom + bouton edit
+                                    GestureDetector(
+                                      onTap: _showEditDisplayName,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            _profile?.displayName.isNotEmpty ==
+                                                    true
+                                                ? _profile!.displayName
+                                                : 'Sans nom',
+                                            style: _arcade(
+                                              size: 24,
+                                              color: Colors.white,
+                                              shadows: const [
+                                                Shadow(
+                                                  color: Colors.black45,
+                                                  offset: Offset(2, 3),
+                                                ),
                                               ],
                                             ),
                                           ),
-                                          child: const Center(
-                                            child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2,
-                                            ),
+                                          const SizedBox(width: 8),
+                                          Icon(
+                                            Icons.edit_rounded,
+                                            color: _creamFaint,
+                                            size: 16,
                                           ),
-                                        )
-                                        : _buildAvatarWidget(),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // Username pill
                                     Container(
-                                      padding: const EdgeInsets.all(6),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 5,
+                                      ),
                                       decoration: BoxDecoration(
-                                        gradient: const LinearGradient(
-                                          colors: [
-                                            Color(0xFF7C3AED),
-                                            Color(0xFFDB2777),
-                                          ],
+                                        color: _teal.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
                                         ),
-                                        shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: const Color(0xFF0D0D1A),
-                                          width: 2,
+                                          color: _teal.withValues(alpha: 0.4),
                                         ),
                                       ),
-                                      child: const Icon(
-                                        Icons.edit_rounded,
-                                        color: Colors.white,
-                                        size: 12,
+                                      child: Text(
+                                        '@${_profile?.username ?? ''}',
+                                        style: _body(
+                                          size: 12.5,
+                                          color: _teal,
+                                          weight: FontWeight.w700,
+                                        ),
                                       ),
+                                    ),
+                                    const SizedBox(height: 20),
+                                    // Stats
+                                    Row(
+                                      children: [
+                                        _statCard(
+                                          'Collections',
+                                          _collectionsCount,
+                                          Icons.auto_awesome_rounded,
+                                          _gold,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        _statCard(
+                                          'Cartes',
+                                          _cardsCount,
+                                          Icons.style_rounded,
+                                          _teal,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        _statCard(
+                                          'Amis',
+                                          _friendsCount,
+                                          Icons.people_rounded,
+                                          _coral,
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 14),
-                              // Nom + bouton edit
-                              GestureDetector(
-                                onTap: _showEditDisplayName,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      _profile?.displayName.isNotEmpty == true
-                                          ? _profile!.displayName
-                                          : 'Sans nom',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      Icons.edit_rounded,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.35,
-                                      ),
-                                      size: 16,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              // Username (propre, pas l'UUID)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFF7C3AED,
-                                  ).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: const Color(
-                                      0xFF7C3AED,
-                                    ).withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: Text(
-                                  '@${_profile?.username ?? ''}',
-                                  style: const TextStyle(
-                                    color: Color(0xFFB06EF3),
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              // Stats
-                              Row(
-                                children: [
-                                  _statCard(
-                                    'Collections',
-                                    _collectionsCount,
-                                    Icons.auto_awesome_rounded,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  _statCard(
-                                    'Cartes',
-                                    _cardsCount,
-                                    Icons.style_rounded,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  _statCard(
-                                    'Amis',
-                                    _friendsCount,
-                                    Icons.people_rounded,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ),
 
-                  // ── Contenu ──────────────────────────────────────────────────
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-                    sliver: SliverList(
-                      delegate: SliverChildListDelegate([
-                        // Section Compte
-                        _sectionLabel('Compte'),
-                        const SizedBox(height: 10),
-                        _accountTile(
-                          icon: Icons.badge_rounded,
-                          label: 'Nom affiché',
-                          value: _profile?.displayName ?? '',
-                          onTap: _showEditDisplayName,
-                          showChevron: true,
-                        ),
-                        const SizedBox(height: 8),
-                        _accountTile(
-                          icon: Icons.alternate_email_rounded,
-                          label: 'Identifiant',
-                          value: '@${_profile?.username ?? ''}',
-                          onTap: null,
-                          showChevron: false,
-                        ),
-                        const SizedBox(height: 8),
-                        _accountTile(
-                          icon: Icons.email_rounded,
-                          label: 'Email',
-                          value: AuthService.instance.currentUser?.email ?? '',
-                          onTap: null,
-                          showChevron: false,
-                        ),
-                        const SizedBox(height: 28),
+                      // ── Contenu ────────────────────────────────────────────
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate([
+                            _sectionLabel('Compte'),
+                            const SizedBox(height: 10),
+                            _accountTile(
+                              icon: Icons.badge_rounded,
+                              label: 'Nom affiché',
+                              value: _profile?.displayName ?? '',
+                              onTap: _showEditDisplayName,
+                              showChevron: true,
+                            ),
+                            const SizedBox(height: 8),
+                            _accountTile(
+                              icon: Icons.alternate_email_rounded,
+                              label: 'Identifiant',
+                              value: '@${_profile?.username ?? ''}',
+                              onTap: null,
+                              showChevron: false,
+                            ),
+                            const SizedBox(height: 8),
+                            _accountTile(
+                              icon: Icons.email_rounded,
+                              label: 'Email',
+                              value:
+                                  AuthService.instance.currentUser?.email ?? '',
+                              onTap: null,
+                              showChevron: false,
+                            ),
+                            const SizedBox(height: 28),
 
-                        // Déconnexion
-                        GestureDetector(
-                          onTap: () => AuthService.instance.signOut(),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 16,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: Colors.red.withValues(alpha: 0.25),
-                              ),
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.logout_rounded,
-                                  color: Colors.red,
-                                  size: 18,
+                            // Déconnexion
+                            GestureDetector(
+                              onTap: () => AuthService.instance.signOut(),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                  horizontal: 16,
                                 ),
-                                SizedBox(width: 10),
-                                Text(
-                                  'Se déconnecter',
-                                  style: TextStyle(
-                                    color: Colors.red,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
+                                decoration: BoxDecoration(
+                                  color: _coral.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: _coral.withValues(alpha: 0.3),
+                                    width: 1.5,
                                   ),
                                 ),
-                              ],
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.logout_rounded,
+                                      color: _coral,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Se déconnecter',
+                                      style: _body(
+                                        color: _coral,
+                                        size: 15,
+                                        weight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
+                          ]),
                         ),
-                      ]),
+                      ),
+                    ],
+                  ),
+                  // Scanlines CRT
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(painter: _ScanlinePainter()),
                     ),
                   ),
                 ],
@@ -1068,47 +1309,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _statCard(String label, int value, IconData icon) => Expanded(
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: const Color(0xFFB06EF3), size: 18),
-          const SizedBox(height: 6),
-          Text(
-            '$value',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
+  Widget _statCard(String label, int value, IconData icon, Color accent) =>
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _surfaceLine, width: 1.5),
           ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.45),
-              fontSize: 11,
-            ),
+          child: Column(
+            children: [
+              Icon(icon, color: accent, size: 18),
+              const SizedBox(height: 6),
+              Text('$value', style: _arcade(size: 22, color: _cream)),
+              const SizedBox(height: 3),
+              Text(
+                label.toUpperCase(),
+                style: _pixel(
+                  size: 7.5,
+                  color: _creamFaint,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 
   Widget _sectionLabel(String label) => Text(
     label.toUpperCase(),
-    style: TextStyle(
-      color: Colors.white.withValues(alpha: 0.35),
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 1.5,
-    ),
+    style: _pixel(size: 9, color: _creamFaint, letterSpacing: 1.5),
   );
 
   Widget _accountTile({
@@ -1122,37 +1353,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+        color: _surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        border: Border.all(color: _surfaceLine, width: 1.5),
       ),
       child: Row(
         children: [
           Container(
             width: 34,
             height: 34,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.15),
+              color: _gold.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(icon, color: const Color(0xFFB06EF3), size: 17),
+            child: Icon(icon, color: _gold, size: 17),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.4),
-                    fontSize: 11,
-                  ),
-                ),
+                Text(label, style: _body(size: 11, color: _creamFaint)),
                 const SizedBox(height: 1),
                 Text(
                   value,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: _body(size: 14, color: _cream),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1160,12 +1386,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           if (showChevron)
-            Icon(
-              Icons.chevron_right_rounded,
-              color: Colors.white.withValues(alpha: 0.25),
-              size: 20,
-            ),
+            Icon(Icons.chevron_right_rounded, color: _creamFaint, size: 20),
         ],
+      ),
+    ),
+  );
+
+  // Anneau or réutilisable autour du contenu d'avatar (90px).
+  Widget _avatarRing(Widget child) => Container(
+    width: 90,
+    height: 90,
+    padding: const EdgeInsets.all(3),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFFFFE89A), _gold, _goldDeep],
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: _gold.withValues(alpha: 0.45),
+          blurRadius: 20,
+          spreadRadius: 1,
+        ),
+      ],
+    ),
+    child: ClipOval(
+      child: DecoratedBox(
+        decoration: const BoxDecoration(color: _surface),
+        child: SizedBox.expand(child: child),
       ),
     ),
   );
@@ -1174,79 +1424,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final av = _profile?.avatarUrl;
     if (av != null && av.startsWith('preset:')) {
       final emoji = av.replaceFirst('preset:', '');
-      return Container(
-        width: 90,
-        height: 90,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.5),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Center(child: Text(emoji, style: const TextStyle(fontSize: 44))),
+      return _avatarRing(
+        Center(child: Text(emoji, style: const TextStyle(fontSize: 42))),
       );
     }
     if (av != null && av.isNotEmpty) {
-      return Container(
-        width: 90,
-        height: 90,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.5),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: ClipOval(
-          child: Image.network(
-            av,
-            key: ValueKey(av),
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _defaultAvatar(),
-          ),
+      return _avatarRing(
+        Image.network(
+          av,
+          key: ValueKey(av),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _defaultAvatarInner(),
         ),
       );
     }
-    return _defaultAvatar();
+    return _avatarRing(_defaultAvatarInner());
   }
 
-  Widget _defaultAvatar() => Container(
-    width: 90,
-    height: 90,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: const LinearGradient(
-        colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: const Color(0xFF7C3AED).withValues(alpha: 0.5),
-          blurRadius: 20,
-          spreadRadius: 2,
-        ),
-      ],
-    ),
-    child: Center(
-      child: Text(
-        _profile?.displayName.isNotEmpty == true
-            ? _profile!.displayName[0].toUpperCase()
-            : '?',
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 38,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
+  Widget _defaultAvatarInner() => Center(
+    child: Text(
+      _profile?.displayName.isNotEmpty == true
+          ? _profile!.displayName[0].toUpperCase()
+          : '?',
+      style: _arcade(size: 38, color: _gold),
     ),
   );
 }
@@ -1263,9 +1463,10 @@ class _AvatarPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F0F1E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: _surfaceLine, width: 1.5),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1274,40 +1475,23 @@ class _AvatarPickerSheet extends StatelessWidget {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.white24,
+              color: _creamFaint,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'Choisir un avatar',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text('Choisir un avatar', style: _arcade(size: 18)),
           const SizedBox(height: 20),
           if (!kIsWeb)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onPickGallery,
-                icon: const Icon(
-                  Icons.photo_library_rounded,
-                  color: Colors.white70,
-                ),
-                label: const Text(
-                  'Choisir depuis la galerie',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
+            _GhostButton(
+              onTap: onPickGallery,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.photo_library_rounded, size: 18),
+                  SizedBox(width: 8),
+                  Text('Choisir depuis la galerie'),
+                ],
               ),
             ),
           const SizedBox(height: 20),
@@ -1315,11 +1499,7 @@ class _AvatarPickerSheet extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               'AVATARS PRÉDÉFINIS',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 10,
-                letterSpacing: 2,
-              ),
+              style: _pixel(size: 8.5, color: _creamFaint, letterSpacing: 2),
             ),
           ),
           const SizedBox(height: 12),
@@ -1337,11 +1517,9 @@ class _AvatarPickerSheet extends StatelessWidget {
                   onTap: () => onPickPreset(_presetAvatars[i]),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
+                      color: _surface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
+                      border: Border.all(color: _surfaceLine, width: 1.5),
                     ),
                     child: Center(
                       child: Text(

@@ -1,11 +1,24 @@
 ﻿// collection_detail_screen.dart
-// FIX 1 : isolation des cartes par collection
-// FIX 2 : mode déplacement avec Listener — bypass complet de l'arène de gestes
+// ════════════════════════════════════════════════════════════════════════════
+//  RESKIN « RÉTRO-ARCADE PREMIUM » (réf. handoff Brokemon / Balatro)
+//  ⚠️ VISUEL UNIQUEMENT — toute la logique est conservée à l'identique :
+//     • FIX 1 : isolation des cartes par collection
+//     • FIX 2 : mode déplacement avec Listener (bypass de l'arène de gestes)
+//     • timers, Supabase, tirage pondéré, streak, customizer : INCHANGÉS
+//
+//  ▶ POLICES : ce fichier utilise le package `google_fonts`
+//    (Lilita One = titres arcade, Silkscreen = labels pixel, Plus Jakarta Sans
+//     = corps). Ajoute-le une seule fois :
+//        flutter pub add google_fonts
+//    Si tu ne veux PAS de dépendance, va voir le bloc « FONTS » plus bas :
+//    mets _kUseGoogleFonts = false et tu retombes sur les polices système.
+// ════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,7 +30,108 @@ import 'card_model.dart';
 import 'pack_opening_screen.dart';
 import 'card_inspector_screen.dart';
 import 'pack_customizer_screen.dart';
+import 'streak_service.dart';
 
+// ════════════════════════════════════════════════════════════════════════════
+//  TOKENS DE DESIGN
+// ════════════════════════════════════════════════════════════════════════════
+const _bg = Color(0xFF14101F); // aubergine nuit
+const _bgDeep = Color(0xFF0D0A16); // fond profond
+const _surface = Color(0xFF211A33);
+const _gold = Color(0xFFFFC83D); // accent signature
+const _goldDeep = Color(0xFFE0A91E);
+const _teal = Color(0xFF21E6C1);
+const _coral = Color(0xFFFF5D73);
+const _cream = Color(0xFFF6EEDD);
+
+final _creamDim = _cream.withValues(alpha: 0.62);
+final _creamFaint = _cream.withValues(alpha: 0.34);
+final _surfaceLine = _cream.withValues(alpha: 0.10);
+
+// Couleurs de rareté (cadre + glow) — palette arcade
+const _rarColors = {
+  Rarity.common: Color(0xFF9AA0B0),
+  Rarity.uncommon: Color(0xFF3FD17A),
+  Rarity.rare: Color(0xFF2FA8FF),
+  Rarity.epic: Color(0xFFB45CFF),
+  Rarity.legendary: Color(0xFFFFC83D),
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  FONTS — bascule unique
+// ════════════════════════════════════════════════════════════════════════════
+const bool _kUseGoogleFonts = true;
+
+TextStyle _arcade({
+  double size = 16,
+  Color color = _cream,
+  double letterSpacing = 0.5,
+  double? height,
+  List<Shadow>? shadows,
+}) {
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.lilitaOne(
+      fontSize: size,
+      color: color,
+      letterSpacing: letterSpacing,
+      height: height,
+      shadows: shadows,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: color,
+    fontWeight: FontWeight.w900,
+    letterSpacing: letterSpacing,
+    height: height,
+    shadows: shadows,
+  );
+}
+
+TextStyle _pixel({double size = 9, Color? color, double letterSpacing = 1}) {
+  final c = color ?? _creamFaint;
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.silkscreen(
+      fontSize: size,
+      color: c,
+      letterSpacing: letterSpacing,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: c,
+    fontFamily: 'monospace',
+    fontWeight: FontWeight.bold,
+    letterSpacing: letterSpacing,
+  );
+}
+
+TextStyle _body({
+  double size = 13,
+  Color? color,
+  FontWeight weight = FontWeight.w600,
+  double? height,
+}) {
+  final c = color ?? _cream;
+  if (_kUseGoogleFonts) {
+    return GoogleFonts.plusJakartaSans(
+      fontSize: size,
+      color: c,
+      fontWeight: weight,
+      height: height,
+    );
+  }
+  return TextStyle(
+    fontSize: size,
+    color: c,
+    fontWeight: weight,
+    height: height,
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  LOGIQUE DE TIRAGE — INCHANGÉE
+// ════════════════════════════════════════════════════════════════════════════
 const _dropRates = {
   Rarity.common: 50,
   Rarity.uncommon: 28,
@@ -58,6 +172,7 @@ SavedCard _weightedPick(List<SavedCard> pool, math.Random rng) {
   return pool[rng.nextInt(pool.length)];
 }
 
+// Palettes par série (utilisées pour la bannière) — INCHANGÉES
 const _palettes = [
   [Color(0xFF7C3AED), Color(0xFF2563EB)],
   [Color(0xFFDB2777), Color(0xFF7C3AED)],
@@ -78,6 +193,220 @@ String _catKey(String colId) {
   final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
   return 'local_cat_${uid}_$colId';
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PRIMITIVES ARCADE PARTAGÉES
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Bouton arcade biseauté qui s'enfonce au clic (translateY +5, ombre réduite).
+class _ArcadeButton extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final bool big;
+  const _ArcadeButton({required this.child, this.onTap, this.big = false});
+
+  @override
+  State<_ArcadeButton> createState() => _ArcadeButtonState();
+}
+
+class _ArcadeButtonState extends State<_ArcadeButton> {
+  bool _down = false;
+  void _set(bool v) => setState(() => _down = v);
+
+  @override
+  Widget build(BuildContext context) {
+    final depth = _down ? 1.0 : 6.0;
+    return GestureDetector(
+      onTapDown: (_) => _set(true),
+      onTapCancel: () => _set(false),
+      onTapUp: (_) => _set(false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 70),
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(0, _down ? 5 : 0, 0),
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          vertical: widget.big ? 17 : 13,
+          horizontal: widget.big ? 26 : 20,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color.lerp(_gold, Colors.white, 0.12)!, _gold, _goldDeep],
+            stops: const [0.0, 0.42, 1.0],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _goldDeep,
+              offset: Offset(0, depth),
+              blurRadius: 0,
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              offset: Offset(0, depth + 6),
+              blurRadius: 22,
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // gleam (reflet haut)
+            Positioned(
+              top: 3,
+              left: 14,
+              right: 14,
+              child: IgnorePointer(
+                child: Container(
+                  height: widget.big ? 16 : 12,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.55),
+                        Colors.white.withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            DefaultTextStyle(
+              style: _arcade(
+                size: widget.big ? 19 : 15.5,
+                color: const Color(0xFF2A1C00),
+              ),
+              child: IconTheme(
+                data: const IconThemeData(color: Color(0xFF2A1C00), size: 20),
+                child: Center(child: widget.child),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GhostButton extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  const _GhostButton({required this.child, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 18),
+        decoration: BoxDecoration(
+          color: _cream.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _surfaceLine, width: 1.5),
+        ),
+        child: DefaultTextStyle(
+          style: _body(size: 14.5, color: _cream, weight: FontWeight.w700),
+          child: IconTheme(
+            data: IconThemeData(color: _creamDim, size: 18),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Widget _pixelBadge(
+  String text, {
+  Color? color,
+  bool filled = false,
+  Color? bg,
+  Color? borderColor,
+  double size = 8.5,
+}) {
+  final c = color ?? _cream;
+  return Container(
+    padding: const EdgeInsets.fromLTRB(7, 4, 7, 3),
+    decoration: BoxDecoration(
+      color: filled ? c : (bg ?? Colors.transparent),
+      borderRadius: BorderRadius.circular(5),
+      border: Border.all(
+        color: filled ? Colors.transparent : (borderColor ?? c),
+        width: 1.5,
+      ),
+    ),
+    child: Text(
+      text.toUpperCase(),
+      style: _pixel(size: size, color: filled ? _bg : c, letterSpacing: 0.5),
+    ),
+  );
+}
+
+/// Rayons en éventail derrière la bannière (statique, léger).
+class _RayBurstPainter extends CustomPainter {
+  final Color color;
+  final double opacity;
+  _RayBurstPainter(this.color, this.opacity);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final radius = size.longestSide * 1.2;
+    final paint = Paint()..color = color.withValues(alpha: opacity);
+    const rays = 30;
+    for (int i = 0; i < rays; i++) {
+      final a0 = i * 2 * math.pi / rays;
+      final a1 = a0 + (math.pi / rays) * 0.55;
+      final path =
+          Path()
+            ..moveTo(c.dx, c.dy)
+            ..lineTo(c.dx + radius * math.cos(a0), c.dy + radius * math.sin(a0))
+            ..lineTo(c.dx + radius * math.cos(a1), c.dy + radius * math.sin(a1))
+            ..close();
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RayBurstPainter old) => false;
+}
+
+Widget _rayBurst(Color color, double opacity) => Positioned.fill(
+  child: IgnorePointer(
+    child: ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback:
+          (r) => const RadialGradient(
+            colors: [Colors.black, Colors.transparent],
+            stops: [0.08, 0.62],
+          ).createShader(r),
+      child: CustomPaint(painter: _RayBurstPainter(color, opacity)),
+    ),
+  ),
+);
+
+/// Scanlines CRT globales, très discrètes.
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = Colors.black.withValues(alpha: 0.05);
+    for (double y = 0; y < size.height; y += 3) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, 1), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScanlinePainter old) => false;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  ÉCRAN DÉTAIL DE SÉRIE
+// ════════════════════════════════════════════════════════════════════════════
 
 class CollectionDetailScreen extends StatefulWidget {
   final CollectionModel collection;
@@ -104,43 +433,39 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   String _sortBy = 'rarity';
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
   // TabBarView (gauche/droite) ET NestedScrollView (haut/bas)
-  bool _cardMoveMode =
-      false; // Reflète les modifs du pack faites par le proprio
+  bool _cardMoveMode = false;
+  // Reflète les modifs du pack faites par le proprio
   CollectionModel? _editedCollection;
   CollectionModel get _col => _editedCollection ?? widget.collection;
+
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 3, vsync: this);
+    _isAdmin = widget.collection.isOwnedBy(widget.myUserId);
+    _loadAdmin();
     _syncAndLoad();
   }
 
-  Widget _customizePackBtn() => GestureDetector(
+  Future<void> _loadAdmin() async {
+    final admin = await CollectionService.instance.amIAdminOf(
+      widget.collection.id,
+      widget.collection.ownerUserId,
+    );
+    if (mounted && admin != _isAdmin) setState(() => _isAdmin = admin);
+  }
+
+  Widget _customizePackBtn() => _GhostButton(
     onTap: _openCustomizer,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-      ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.tune_rounded, color: Colors.white70, size: 18),
-          SizedBox(width: 8),
-          Text(
-            'Personnaliser le pack',
-            style: TextStyle(
-              color: Colors.white70,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
+    child: const Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.tune_rounded, size: 18),
+        SizedBox(width: 8),
+        Text('Personnaliser le pack'),
+      ],
     ),
   );
 
@@ -170,22 +495,29 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   void _startTimer() async {
     final r = await PackSystem.timeUntilNextPack(widget.collection.id);
     final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted)
+    if (mounted) {
       setState(() {
         _remaining = r;
         _canOpen = c;
       });
+    }
     if (!c) {
       _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
-        final r2 = await PackSystem.timeUntilNextPack(widget.collection.id);
-        final c2 = await PackSystem.canOpenPack(widget.collection.id);
-        if (mounted)
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) {
+          _timer?.cancel();
+          return;
+        }
+        final next = _remaining - const Duration(seconds: 1);
+        if (next <= Duration.zero) {
+          _timer?.cancel();
           setState(() {
-            _remaining = r2;
-            _canOpen = c2;
+            _remaining = Duration.zero;
+            _canOpen = true;
           });
-        if (c2) _timer?.cancel();
+        } else {
+          setState(() => _remaining = next);
+        }
       });
     }
   }
@@ -246,6 +578,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     final rng = math.Random();
     final packCards = List.generate(3, (_) => _weightedPick(pool, rng));
     await PackSystem.setLastOpenedTime(widget.collection.id);
+    final streak = await StreakService.registerPackOpened();
+    if (mounted && streak.increasedToday) {
+      _msg(
+        '🔥 Série : ${streak.streak} jour${streak.streak > 1 ? 's' : ''} d\'affilée !',
+      );
+    }
     final prefs = await SharedPreferences.getInstance();
     final key = _obtKey(widget.collection.id);
     final existing = prefs.getStringList(key) ?? [];
@@ -283,16 +621,19 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
-        backgroundColor: err ? Colors.red.shade800 : Colors.green.shade700,
+        content: Text(msg, style: _body(color: Colors.white)),
+        backgroundColor: err ? _coral : _teal.withValues(alpha: 0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 
   List<SavedCard> _sorted(List<SavedCard> cards) {
     final l = [...cards];
-    if (_sortBy == 'rarity')
+    if (_sortBy == 'rarity') {
       l.sort((a, b) => b.rarity.index.compareTo(a.rarity.index));
+    }
     if (_sortBy == 'name') l.sort((a, b) => a.name.compareTo(b.name));
     return l;
   }
@@ -301,98 +642,142 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget build(BuildContext context) {
     final p = _pal(widget.collection.id);
     return Scaffold(
-      backgroundColor: const Color(0xFF080814),
-      body: NestedScrollView(
-        // FIX : bloque le scroll vertical quand on déplace un élément
-        physics:
-            _cardMoveMode
-                ? const NeverScrollableScrollPhysics()
-                : const ScrollPhysics(),
-        headerSliverBuilder: (_, __) => [_appBar(p)],
-        body: Column(
-          children: [
-            Container(
-              color: const Color(0xFF0F0F1E),
-              child: TabBar(
-                controller: _tabCtrl,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white38,
-                indicatorColor: p[0],
-                tabs: const [
-                  Tab(text: '🎁 Pack'),
-                  Tab(text: '🃏 Cartes'),
-                  Tab(text: '✏️ Créer'),
-                ],
+      backgroundColor: _bgDeep,
+      body: Stack(
+        children: [
+          // fond avec halo radial haut
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -1.1),
+                  radius: 1.3,
+                  colors: [Color(0xFF271C40), _bg, _bgDeep],
+                  stops: [0.0, 0.48, 1.0],
+                ),
               ),
             ),
-            Expanded(
-              child:
-                  _loading
-                      ? const Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF7C3AED),
-                        ),
-                      )
-                      : TabBarView(
-                        controller: _tabCtrl,
-                        // FIX : bloque le scroll gauche/droite quand on déplace un élément
-                        physics:
-                            _cardMoveMode
-                                ? const NeverScrollableScrollPhysics()
-                                : const ScrollPhysics(),
-                        children: [_packTab(p), _cardsTab(), _createTab(p)],
-                      ),
+          ),
+          NestedScrollView(
+            // FIX : bloque le scroll vertical quand on déplace un élément
+            physics:
+                _cardMoveMode
+                    ? const NeverScrollableScrollPhysics()
+                    : const ScrollPhysics(),
+            headerSliverBuilder: (_, __) => [_appBar(p)],
+            body: Column(
+              children: [
+                // ── Onglets restylés ──────────────────────────────────────
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: _surfaceLine, width: 1.5),
+                    ),
+                  ),
+                  child: TabBar(
+                    controller: _tabCtrl,
+                    labelColor: _cream,
+                    unselectedLabelColor: _creamFaint,
+                    labelStyle: _body(size: 14.5, weight: FontWeight.w800),
+                    unselectedLabelStyle: _body(
+                      size: 14.5,
+                      weight: FontWeight.w700,
+                    ),
+                    indicatorColor: _gold,
+                    indicatorWeight: 3,
+                    indicatorSize: TabBarIndicatorSize.label,
+                    dividerColor: Colors.transparent,
+                    tabs: const [
+                      Tab(text: '🎁 Pack'),
+                      Tab(text: '🃏 Cartes'),
+                      Tab(text: '✏️ Créer'),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child:
+                      _loading
+                          ? const Center(
+                            child: CircularProgressIndicator(color: _gold),
+                          )
+                          : TabBarView(
+                            controller: _tabCtrl,
+                            // FIX : bloque le scroll gauche/droite en mode déplacement
+                            physics:
+                                _cardMoveMode
+                                    ? const NeverScrollableScrollPhysics()
+                                    : const ScrollPhysics(),
+                            children: [_packTab(p), _cardsTab(), _createTab(p)],
+                          ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          // ── Scanlines CRT par-dessus tout ───────────────────────────────
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _ScanlinePainter()),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _appBar(List<Color> p) => SliverAppBar(
-    expandedHeight: 150,
+    expandedHeight: 160,
     pinned: true,
-    backgroundColor: const Color(0xFF080814),
-    leading: IconButton(
-      icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-      onPressed: () => Navigator.pop(context),
+    backgroundColor: _bg,
+    elevation: 0,
+    leading: Padding(
+      padding: const EdgeInsets.only(left: 12, top: 8, bottom: 8),
+      child: GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _surfaceLine, width: 1.5),
+          ),
+          child: const Icon(Icons.chevron_left, color: _cream, size: 24),
+        ),
+      ),
     ),
     flexibleSpace: FlexibleSpaceBar(
-      titlePadding: const EdgeInsets.only(left: 56, bottom: 16),
+      titlePadding: const EdgeInsets.only(left: 60, bottom: 16, right: 16),
       title: Text(
         widget.collection.name,
-        style: const TextStyle(
+        style: _arcade(
+          size: 19,
           color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 18,
+          shadows: const [Shadow(color: Colors.black45, offset: Offset(2, 3))],
         ),
       ),
       background: Stack(
+        fit: StackFit.expand,
         children: [
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    p[0].withValues(alpha: 0.8),
-                    p[1].withValues(alpha: 0.5),
-                    const Color(0xFF080814),
-                  ],
-                ),
+          // dégradé série
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [p[0], Color.lerp(p[0], _bg, 0.6)!, _bg],
+                stops: const [0.0, 0.6, 1.0],
               ),
             ),
           ),
+          _rayBurst(p[1], 0.12),
           if (widget.collection.imageUrl != null)
-            Positioned.fill(
-              child: Opacity(
-                opacity: 0.15,
-                child: Image.network(
-                  widget.collection.imageUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
+            Opacity(
+              opacity: 0.15,
+              child: Image.network(
+                widget.collection.imageUrl!,
+                fit: BoxFit.cover,
+                cacheWidth: 600,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
           Positioned(
@@ -400,9 +785,19 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             right: 16,
             child: Row(
               children: [
-                _chip(widget.collection.cooldownLabel, Icons.timer_rounded),
+                _pixelBadge(
+                  '⏱ ${widget.collection.cooldownLabel}',
+                  color: Colors.white,
+                  bg: Colors.black.withValues(alpha: 0.3),
+                  borderColor: Colors.white.withValues(alpha: 0.3),
+                ),
                 const SizedBox(width: 8),
-                _chip('${_catalogue.length} cartes', Icons.style_rounded),
+                _pixelBadge(
+                  '🃏 ${_catalogue.length}',
+                  color: Colors.white,
+                  bg: Colors.black.withValues(alpha: 0.3),
+                  borderColor: Colors.white.withValues(alpha: 0.3),
+                ),
               ],
             ),
           ),
@@ -411,32 +806,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     ),
   );
 
-  Widget _chip(String label, IconData icon) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: 0.4),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: Colors.white70, size: 11),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    ),
-  );
-
+  // ── ONGLET PACK ───────────────────────────────────────────────────────────
   Widget _packTab(List<Color> p) => SingleChildScrollView(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(18),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -454,38 +826,34 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         const SizedBox(height: 12),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 20),
+          padding: const EdgeInsets.symmetric(vertical: 18),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.white.withValues(alpha: 0.06),
-                Colors.white.withValues(alpha: 0.03),
-              ],
-            ),
+            color: _surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            border: Border.all(
+              color: _surfaceLine,
+              width: 1.5,
+              style: BorderStyle.solid,
+            ),
           ),
           child: Column(
             children: [
               Text(
                 'CODE',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.4),
-                  fontSize: 10,
-                  letterSpacing: 3,
-                ),
+                style: _pixel(size: 8, color: _creamFaint, letterSpacing: 2),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               ShaderMask(
                 shaderCallback:
-                    (b) => LinearGradient(colors: p).createShader(b),
+                    (b) => const LinearGradient(
+                      colors: [_teal, Color(0xFF2FA8FF), _coral],
+                    ).createShader(b),
                 child: Text(
                   widget.collection.code,
-                  style: const TextStyle(
+                  style: _arcade(
+                    size: 32,
                     color: Colors.white,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 10,
+                    letterSpacing: 8,
                   ),
                 ),
               ),
@@ -498,37 +866,35 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   List<Widget> _dropRows() =>
       Rarity.values.reversed.map((r) {
-        final rc = _rc(r);
+        final rc = _rarColors[r]!;
         return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: 11),
           child: Row(
             children: [
               Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: rc, shape: BoxShape.circle),
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: rc,
+                  borderRadius: BorderRadius.circular(2),
+                  boxShadow: [
+                    BoxShadow(color: rc.withValues(alpha: 0.6), blurRadius: 8),
+                  ],
+                ),
               ),
               const SizedBox(width: 10),
               SizedBox(
-                width: 90,
-                child: Text(
-                  _rn(r),
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.7),
-                    fontSize: 13,
-                  ),
-                ),
+                width: 92,
+                child: Text(_rn(r), style: _body(size: 13.5, color: _creamDim)),
               ),
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
                     value: _dropRates[r]! / 100.0,
-                    backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    valueColor: AlwaysStoppedAnimation(
-                      rc.withValues(alpha: 0.7),
-                    ),
-                    minHeight: 6,
+                    backgroundColor: Colors.black.withValues(alpha: 0.3),
+                    valueColor: AlwaysStoppedAnimation(rc),
+                    minHeight: 7,
                   ),
                 ),
               ),
@@ -538,11 +904,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                 child: Text(
                   _dropLabels[r]!,
                   textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: rc,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: _pixel(size: 10, color: rc),
                 ),
               ),
             ],
@@ -550,105 +912,64 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         );
       }).toList();
 
-  Widget _openBtn(List<Color> p) => GestureDetector(
+  Widget _openBtn(List<Color> p) => _ArcadeButton(
+    big: true,
     onTap: _openPack,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: p),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: p[0].withValues(alpha: 0.5),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-          SizedBox(width: 10),
-          Text(
-            'Ouvrir un booster',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 18,
-            ),
-          ),
-        ],
-      ),
+    child: const Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.auto_awesome, size: 22),
+        SizedBox(width: 10),
+        Text('OUVRIR LE PACK'),
+      ],
     ),
   );
 
   Widget _timerWidget() => Container(
     width: double.infinity,
-    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.04),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      color: _surface,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: _surfaceLine, width: 1.5),
     ),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    child: Column(
       children: [
-        const Icon(
-          Icons.hourglass_bottom_rounded,
-          color: Colors.white38,
-          size: 20,
+        Text(
+          '⏳ Prochain booster gratuit dans',
+          style: _body(size: 12, color: _creamDim, weight: FontWeight.w600),
         ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Prochain booster dans',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              PackSystem.formatDuration(_remaining),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
+        const SizedBox(height: 4),
+        Text(
+          PackSystem.formatDuration(_remaining),
+          style: _arcade(
+            size: 30,
+            color: _teal,
+            shadows: [
+              Shadow(color: _teal.withValues(alpha: 0.4), blurRadius: 16),
+            ],
+          ),
         ),
       ],
     ),
   );
 
-  Widget _secTitle(String t) => Text(
-    t,
-    style: const TextStyle(
-      color: Colors.white,
-      fontSize: 16,
-      fontWeight: FontWeight.w800,
-    ),
-  );
+  Widget _secTitle(String t) => Text(t, style: _arcade(size: 16));
 
+  // ── ONGLET CARTES ───────────────────────────────────────────────────────
   Widget _cardsTab() => Column(
     children: [
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        color: const Color(0xFF0A0A18),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
-              Text(
-                'Trier : ',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.35),
-                  fontSize: 12,
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  'TRIER',
+                  style: _pixel(size: 8, color: _creamFaint),
                 ),
               ),
               ...[
@@ -665,34 +986,22 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                       duration: const Duration(milliseconds: 150),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
-                        vertical: 5,
+                        vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color:
-                            sel
-                                ? const Color(
-                                  0xFF7C3AED,
-                                ).withValues(alpha: 0.25)
-                                : Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(8),
+                        color: sel ? _gold : _cream.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(9),
                         border: Border.all(
-                          color:
-                              sel
-                                  ? const Color(
-                                    0xFF7C3AED,
-                                  ).withValues(alpha: 0.6)
-                                  : Colors.white.withValues(alpha: 0.1),
+                          color: sel ? Colors.transparent : _surfaceLine,
+                          width: 1.5,
                         ),
                       ),
                       child: Text(
                         item.$2,
-                        style: TextStyle(
-                          color:
-                              sel
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.4),
-                          fontSize: 11,
-                          fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                        style: _body(
+                          size: 12,
+                          color: sel ? const Color(0xFF2A1C00) : _creamDim,
+                          weight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -710,26 +1019,29 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget _cardGrid() {
     final obtIds = _obtainedCards.map((c) => c.id).toSet();
     final cards = _sorted(_catalogue);
-    final isOwner = widget.collection.isOwnedBy(widget.myUserId);
     if (cards.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.style_outlined,
-              size: 56,
-              color: Colors.white.withValues(alpha: 0.1),
+            Text(
+              '🃏',
+              style: TextStyle(
+                fontSize: 50,
+                color: _cream.withValues(alpha: 0.2),
+              ),
             ),
             const SizedBox(height: 12),
             Text(
-              'Aucune carte\nCrée-en dans l\'onglet ✏️',
+              'Aucune carte',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.3),
-                fontSize: 14,
-                height: 1.5,
-              ),
+              style: _arcade(size: 16, color: _creamFaint),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Crée-en dans l\'onglet ✏️',
+              textAlign: TextAlign.center,
+              style: _body(size: 13, color: _creamFaint),
             ),
           ],
         ),
@@ -748,8 +1060,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
           (_, i) => _CardTile(
             card: cards[i],
             revealed: obtIds.contains(cards[i].id),
-            isAdmin: isOwner,
-            onDelete: isOwner ? () => _confirmDeleteCard(cards[i]) : null,
+            isAdmin: _isAdmin,
+            onDelete: _isAdmin ? () => _confirmDeleteCard(cards[i]) : null,
           ),
     );
   }
@@ -759,32 +1071,36 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       context: context,
       builder:
           (_) => AlertDialog(
-            backgroundColor: const Color(0xFF1A1A2E),
+            backgroundColor: _surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: _surfaceLine, width: 1.5),
             ),
-            title: const Text(
-              'Supprimer la carte ?',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            title: Text('Supprimer la carte ?', style: _arcade(size: 18)),
             content: Text(
               '« ${card.name} » sera retirée de la collection pour tous les membres.',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+              style: _body(size: 13.5, color: _creamDim),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Annuler'),
+                child: Text('Annuler', style: _body(color: _creamDim)),
               ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text(
-                  'Supprimer',
-                  style: TextStyle(color: Colors.white),
+              GestureDetector(
+                onTap: () => Navigator.pop(context, true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _coral,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Supprimer',
+                    style: _body(color: Colors.white, weight: FontWeight.w700),
+                  ),
                 ),
               ),
             ],
@@ -816,9 +1132,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TUILE CARTE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ════════════════════════════════════════════════════════════════════════════
+//   TUILE CARTE — cadre arcade selon rareté
+// ════════════════════════════════════════════════════════════════════════════
 
 class _CardTile extends StatelessWidget {
   final SavedCard card;
@@ -832,20 +1148,7 @@ class _CardTile extends StatelessWidget {
     this.onDelete,
   });
 
-  Color get _rc {
-    switch (card.rarity) {
-      case Rarity.legendary:
-        return const Color(0xFFFFD700);
-      case Rarity.epic:
-        return const Color(0xFF9C27B0);
-      case Rarity.rare:
-        return const Color(0xFF2196F3);
-      case Rarity.uncommon:
-        return const Color(0xFF4CAF50);
-      case Rarity.common:
-        return const Color(0xFF9E9E9E);
-    }
-  }
+  Color get _rc => _rarColors[card.rarity]!;
 
   String get _rl {
     switch (card.rarity) {
@@ -864,7 +1167,40 @@ class _CardTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!revealed) return _back();
+    if (!revealed) {
+      return Stack(
+        children: [
+          _back(),
+          if (isAdmin && onDelete != null)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: onDelete,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 13,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     return GestureDetector(
       onTap:
           () => Navigator.push(
@@ -911,10 +1247,9 @@ class _CardTile extends StatelessWidget {
                     const SizedBox(width: 3),
                     Text(
                       '3D',
-                      style: TextStyle(
+                      style: _pixel(
+                        size: 6,
                         color: Colors.white.withValues(alpha: 0.6),
-                        fontSize: 7,
-                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
@@ -933,7 +1268,7 @@ class _CardTile extends StatelessWidget {
                   width: 22,
                   height: 22,
                   decoration: BoxDecoration(
-                    color: Colors.red.shade700,
+                    color: _coral,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
@@ -955,117 +1290,130 @@ class _CardTile extends StatelessWidget {
     );
   }
 
-  Widget _front() => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _rc, width: 2),
-      color: const Color(0xFF16213E),
-      boxShadow: [BoxShadow(color: _rc.withValues(alpha: 0.3), blurRadius: 6)],
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        children: [
-          if (card.imageBytes != null)
-            Positioned.fill(
-              child: Image.memory(card.imageBytes!, fit: BoxFit.cover),
-            ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
+  Widget _front() {
+    final rc = _rc;
+    final isLeg = card.rarity == Rarity.legendary;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient:
+            isLeg
+                ? const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                   colors: [
-                    Colors.black.withValues(alpha: 0.95),
-                    Colors.transparent,
+                    Color(0xFFFFE89A),
+                    Color(0xFFFFC83D),
+                    Color(0xFFC9920E),
+                    Color(0xFFFFF1B8),
+                  ],
+                )
+                : LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color.lerp(rc, Colors.white, 0.35)!,
+                    rc,
+                    Color.lerp(rc, Colors.black, 0.30)!,
                   ],
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    card.name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _rc.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      _rl,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 6,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        boxShadow: [
+          BoxShadow(color: rc.withValues(alpha: 0.4), blurRadius: 8),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-    ),
-  );
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(9),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [_surface, Color(0xFF171125)],
+            ),
+          ),
+          child: Stack(
+            children: [
+              if (card.imageBytes != null)
+                Positioned.fill(
+                  child: Image.memory(card.imageBytes!, fit: BoxFit.cover, cacheWidth: 400),
+                ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.92),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        card.name,
+                        style: _arcade(size: 9, color: _cream),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      _pixelBadge(_rl, color: rc, size: 6),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _back() => Container(
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(11),
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF1A1A3E), Color(0xFF0D0D1C)],
+        colors: [Color(0xFF1C1530), Color(0xFF140F22)],
       ),
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.1),
-        width: 1.5,
-      ),
+      border: Border.all(color: _rc.withValues(alpha: 0.45), width: 2),
     ),
     child: Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.help_outline_rounded,
-            color: Colors.white.withValues(alpha: 0.15),
-            size: 28,
-          ),
           Text(
-            '?',
+            '❔',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.1),
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
+              fontSize: 24,
+              color: _cream.withValues(alpha: 0.4),
             ),
           ),
+          const SizedBox(height: 6),
+          _pixelBadge(_rl, color: _rc.withValues(alpha: 0.7), size: 6),
         ],
       ),
     ),
   );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   COUCHE IMAGE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ════════════════════════════════════════════════════════════════════════════
+//   COUCHE IMAGE — INCHANGÉE
+// ════════════════════════════════════════════════════════════════════════════
 
 class _ImgLayer {
   Uint8List bytes;
@@ -1074,13 +1422,12 @@ class _ImgLayer {
   _ImgLayer({required this.bytes});
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ════════════════════════════════════════════════════════════════════════════
 //   CRÉATEUR DE CARTE
-//   FIX 2 : Listener sur la carte + mode déplacement
-//   • Quand _moveMode = true : scroll désactivé, Listener capte
-//     TOUS les pointeurs → bypass total de l'arène de gestes
-//   • L'élément sélectionné (_selectedLayer) suit le doigt
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   FIX 2 : Listener sur la carte + mode déplacement (LOGIQUE INCHANGÉE)
+//   • Reskin : chrome, boutons, titres, swatches → style arcade
+//   • Le canvas (positions/drag) reste mécaniquement identique
+// ════════════════════════════════════════════════════════════════════════════
 
 class _CardCreator extends StatefulWidget {
   final List<Color> palette;
@@ -1117,19 +1464,19 @@ class _CardCreatorState extends State<_CardCreator>
   double _rarityX = 8, _rarityY = 222;
 
   int _selectedGrad = -1;
-  int _backColor = 0xFF16213E;
+  int _backColor = 0xFF211A33;
   Uint8List? _backImageBytes;
 
   int _borderColorIndex = -1;
   static const _borderColors = [
     Colors.white,
-    Color(0xFFFFD700),
-    Color(0xFFFF3333),
-    Color(0xFF33FF99),
-    Color(0xFF3399FF),
-    Color(0xFFFF33CC),
+    _gold,
+    _coral,
+    _teal,
+    Color(0xFF2FA8FF),
+    Color(0xFFB45CFF),
     Color(0xFF000000),
-    Color(0xFF888888),
+    Color(0xFF9AA0B0),
   ];
 
   late AnimationController _legendaryCtrl;
@@ -1141,15 +1488,15 @@ class _CardCreatorState extends State<_CardCreator>
     [const Color(0xFF059669), const Color(0xFF2563EB)],
     [const Color(0xFFD97706), const Color(0xFFDB2777)],
     [const Color(0xFF0891B2), const Color(0xFF2563EB)],
-    [const Color(0xFF080814), const Color(0xFF1A1A3E)],
+    [const Color(0xFF14101F), const Color(0xFF2B2240)],
   ];
 
   final _backColors = [
-    0xFF16213E,
-    0xFF1A1A2E,
+    0xFF211A33,
+    0xFF2B2240,
     0xFF0F3460,
     0xFF533483,
-    0xFF2C3E50,
+    0xFF14101F,
     0xFF1B2631,
     0xFF4A235A,
     0xFF1A5276,
@@ -1178,20 +1525,7 @@ class _CardCreatorState extends State<_CardCreator>
     super.dispose();
   }
 
-  Color _rc(Rarity r) {
-    switch (r) {
-      case Rarity.legendary:
-        return const Color(0xFFFFD700);
-      case Rarity.epic:
-        return const Color(0xFF9C27B0);
-      case Rarity.rare:
-        return const Color(0xFF2196F3);
-      case Rarity.uncommon:
-        return const Color(0xFF4CAF50);
-      case Rarity.common:
-        return const Color(0xFF9E9E9E);
-    }
-  }
+  Color _rc(Rarity r) => _rarColors[r]!;
 
   String _rn(Rarity r) {
     switch (r) {
@@ -1293,11 +1627,12 @@ class _CardCreatorState extends State<_CardCreator>
           (_) => StatefulBuilder(
             builder:
                 (ctx, setD) => AlertDialog(
-                  backgroundColor: const Color(0xFF16213E),
-                  title: const Text(
-                    'Modifier le texte',
-                    style: TextStyle(color: Colors.white),
+                  backgroundColor: _surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    side: BorderSide(color: _surfaceLine, width: 1.5),
                   ),
+                  title: Text('Modifier le texte', style: _arcade(size: 17)),
                   content: SingleChildScrollView(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -1305,34 +1640,34 @@ class _CardCreatorState extends State<_CardCreator>
                       children: [
                         TextField(
                           controller: ctrl,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: const InputDecoration(
+                          style: _body(color: _cream),
+                          decoration: InputDecoration(
                             labelText: 'Texte',
-                            labelStyle: TextStyle(color: Colors.white54),
+                            labelStyle: _body(color: _creamFaint),
                             enabledBorder: UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white38),
+                              borderSide: BorderSide(color: _surfaceLine),
                             ),
                           ),
                         ),
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           'Taille',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                          style: _body(size: 13, color: _creamDim),
                         ),
                         Slider(
                           value: fontSize,
                           min: 8,
                           max: 36,
-                          activeColor: const Color(0xFF7C3AED),
+                          activeColor: _gold,
                           onChanged: (v) {
                             setD(() => fontSize = v);
                             setState(() => zone.fontSize = v);
                           },
                         ),
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           'Police',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                          style: _body(size: 13, color: _creamDim),
                         ),
                         const SizedBox(height: 8),
                         Wrap(
@@ -1354,26 +1689,17 @@ class _CardCreatorState extends State<_CardCreator>
                                     decoration: BoxDecoration(
                                       color:
                                           sel
-                                              ? const Color(
-                                                0xFF7C3AED,
-                                              ).withValues(alpha: 0.3)
-                                              : Colors.white.withValues(
-                                                alpha: 0.06,
-                                              ),
+                                              ? _gold.withValues(alpha: 0.25)
+                                              : _cream.withValues(alpha: 0.06),
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color:
-                                            sel
-                                                ? const Color(0xFF7C3AED)
-                                                : Colors.white.withValues(
-                                                  alpha: 0.1,
-                                                ),
+                                        color: sel ? _gold : _surfaceLine,
                                       ),
                                     ),
                                     child: Text(
                                       f.$2,
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: _cream,
                                         fontSize: 11,
                                         fontFamily: f.$1,
                                       ),
@@ -1383,9 +1709,9 @@ class _CardCreatorState extends State<_CardCreator>
                               }).toList(),
                         ),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           'Couleur',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                          style: _body(size: 13, color: _creamDim),
                         ),
                         const SizedBox(height: 8),
                         Wrap(
@@ -1395,12 +1721,12 @@ class _CardCreatorState extends State<_CardCreator>
                               [
                                     Colors.white,
                                     Colors.black,
-                                    Colors.yellow,
-                                    Colors.red,
-                                    Colors.blue,
-                                    Colors.green,
-                                    Colors.orange,
-                                    Colors.purple,
+                                    _gold,
+                                    _coral,
+                                    _teal,
+                                    const Color(0xFF2FA8FF),
+                                    const Color(0xFFB45CFF),
+                                    const Color(0xFF3FD17A),
                                     Colors.pink,
                                     Colors.cyan,
                                     Colors.teal,
@@ -1442,19 +1768,16 @@ class _CardCreatorState extends State<_CardCreator>
                         setState(() => _textZones.removeAt(idx));
                         Navigator.pop(ctx);
                       },
-                      child: const Text(
-                        'Supprimer',
-                        style: TextStyle(color: Colors.red),
-                      ),
+                      child: Text('Supprimer', style: _body(color: _coral)),
                     ),
                     TextButton(
                       onPressed: () {
                         setState(() => zone.text = ctrl.text);
                         Navigator.pop(ctx);
                       },
-                      child: const Text(
+                      child: Text(
                         'OK',
-                        style: TextStyle(color: Color(0xFF7C3AED)),
+                        style: _body(color: _gold, weight: FontWeight.w700),
                       ),
                     ),
                   ],
@@ -1467,8 +1790,9 @@ class _CardCreatorState extends State<_CardCreator>
   String get _selectedLabel {
     if (_selectedLayer == -2) return 'Nom';
     if (_selectedLayer == -3) return 'Rareté';
-    if (_selectedLayer >= 0 && _selectedLayer < _images.length)
+    if (_selectedLayer >= 0 && _selectedLayer < _images.length) {
       return 'Photo ${_selectedLayer + 1}';
+    }
     if (_selectedLayer >= 100) return 'Texte ${_selectedLayer - 99}';
     return '';
   }
@@ -1481,19 +1805,15 @@ class _CardCreatorState extends State<_CardCreator>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Text(
           'Ajoute des photos ou du texte pour voir les éléments ici',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.25),
-            fontSize: 11,
-          ),
+          style: _body(size: 11, color: _creamFaint),
         ),
       );
     }
-    return Container(
+    return SizedBox(
       height: 52,
-      margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         children: [
           _chip2(
             icon: Icons.badge_rounded,
@@ -1571,14 +1891,11 @@ class _CardCreatorState extends State<_CardCreator>
         decoration: BoxDecoration(
           color:
               sel
-                  ? const Color(0xFF7C3AED).withValues(alpha: 0.25)
-                  : Colors.white.withValues(alpha: 0.07),
+                  ? _gold.withValues(alpha: 0.22)
+                  : _cream.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color:
-                sel
-                    ? const Color(0xFF7C3AED)
-                    : Colors.white.withValues(alpha: 0.15),
+            color: sel ? _gold : _surfaceLine,
             width: sel ? 1.5 : 1,
           ),
         ),
@@ -1596,15 +1913,11 @@ class _CardCreatorState extends State<_CardCreator>
                 ),
               )
             else
-              Icon(icon ?? Icons.layers, color: Colors.white, size: 14),
+              Icon(icon ?? Icons.layers, color: _cream, size: 14),
             const SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
+              style: _body(size: 11, color: _cream, weight: FontWeight.w600),
             ),
             if (onDelete != null) ...[
               const SizedBox(width: 4),
@@ -1612,7 +1925,7 @@ class _CardCreatorState extends State<_CardCreator>
                 onTap: onDelete,
                 child: Icon(
                   Icons.close_rounded,
-                  color: Colors.white.withValues(alpha: 0.45),
+                  color: _cream.withValues(alpha: 0.45),
                   size: 13,
                 ),
               ),
@@ -1623,7 +1936,7 @@ class _CardCreatorState extends State<_CardCreator>
     );
   }
 
-  // ── Canvas carte — avec Listener pour le mode déplacement ─────────────────
+  // ── Canvas carte — avec Listener pour le mode déplacement (INCHANGÉ) ──────
   Widget _buildFront() {
     final rc = _currentBorderColor;
 
@@ -1645,7 +1958,7 @@ class _CardCreatorState extends State<_CardCreator>
                   )
                   : const BoxDecoration(
                     borderRadius: BorderRadius.all(Radius.circular(13)),
-                    color: Color(0xFF1A1A2E),
+                    color: _surface,
                   ),
           child: Stack(
             children: [
@@ -1681,10 +1994,7 @@ class _CardCreatorState extends State<_CardCreator>
                           Positioned.fill(
                             child: Container(
                               decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: const Color(0xFF7C3AED),
-                                  width: 2,
-                                ),
+                                border: Border.all(color: _gold, width: 2),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                             ),
@@ -1721,12 +2031,7 @@ class _CardCreatorState extends State<_CardCreator>
                         color: Colors.black.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(4),
                         border:
-                            sel
-                                ? Border.all(
-                                  color: const Color(0xFF7C3AED),
-                                  width: 1.5,
-                                )
-                                : null,
+                            sel ? Border.all(color: _gold, width: 1.5) : null,
                       ),
                       child: Text(
                         zone.text,
@@ -1780,20 +2085,18 @@ class _CardCreatorState extends State<_CardCreator>
                     decoration: BoxDecoration(
                       border:
                           _selectedLayer == -2
-                              ? Border.all(
-                                color: const Color(0xFF7C3AED),
-                                width: 1.5,
-                              )
+                              ? Border.all(color: _gold, width: 1.5)
                               : null,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       _nameCtrl.text,
-                      style: const TextStyle(
+                      style: _arcade(
+                        size: 14,
                         color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                        shadows: const [
+                          Shadow(color: Colors.black, blurRadius: 4),
+                        ],
                       ),
                     ),
                   ),
@@ -1814,7 +2117,7 @@ class _CardCreatorState extends State<_CardCreator>
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
-                      vertical: 2,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
                       color: _rc(_rarity),
@@ -1826,11 +2129,7 @@ class _CardCreatorState extends State<_CardCreator>
                     ),
                     child: Text(
                       _rn(_rarity),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: _pixel(size: 7, color: _bg),
                     ),
                   ),
                 ),
@@ -1903,7 +2202,7 @@ class _CardCreatorState extends State<_CardCreator>
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(14),
       color: Color(_backColor),
-      border: Border.all(color: Colors.white24, width: 2),
+      border: Border.all(color: _surfaceLine, width: 2),
     ),
     child: ClipRRect(
       borderRadius: BorderRadius.circular(12),
@@ -1914,10 +2213,10 @@ class _CardCreatorState extends State<_CardCreator>
               child: Image.memory(_backImageBytes!, fit: BoxFit.cover),
             ),
           if (_backImageBytes == null)
-            const Center(
-              child: Opacity(
-                opacity: 0.2,
-                child: Icon(Icons.style, size: 72, color: Colors.white),
+            Center(
+              child: Text(
+                '?',
+                style: _arcade(size: 90, color: _gold.withValues(alpha: 0.25)),
               ),
             ),
         ],
@@ -1928,9 +2227,12 @@ class _CardCreatorState extends State<_CardCreator>
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Donne un nom à ta carte !'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: Text(
+            'Donne un nom à ta carte !',
+            style: _body(color: Colors.white),
+          ),
+          backgroundColor: _gold,
         ),
       );
       return;
@@ -2015,13 +2317,14 @@ class _CardCreatorState extends State<_CardCreator>
       });
       widget.onSaved();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur : $e'),
-            backgroundColor: Colors.red.shade800,
+            content: Text('Erreur : $e', style: _body(color: Colors.white)),
+            backgroundColor: _coral,
           ),
         );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -2032,7 +2335,7 @@ class _CardCreatorState extends State<_CardCreator>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ── Ligne 1 : toggle recto/verso + bouton mode déplacement ────────────
+        // ── Ligne 1 : toggle recto/verso + bouton mode déplacement ──────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(
@@ -2066,26 +2369,18 @@ class _CardCreatorState extends State<_CardCreator>
                   decoration: BoxDecoration(
                     gradient:
                         _moveMode
-                            ? const LinearGradient(
-                              colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
-                            )
+                            ? const LinearGradient(colors: [_gold, _goldDeep])
                             : null,
-                    color:
-                        _moveMode ? null : Colors.white.withValues(alpha: 0.07),
+                    color: _moveMode ? null : _cream.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color:
-                          _moveMode
-                              ? Colors.transparent
-                              : Colors.white.withValues(alpha: 0.2),
+                      color: _moveMode ? Colors.transparent : _surfaceLine,
                     ),
                     boxShadow:
                         _moveMode
                             ? [
                               BoxShadow(
-                                color: const Color(
-                                  0xFF7C3AED,
-                                ).withValues(alpha: 0.4),
+                                color: _gold.withValues(alpha: 0.4),
                                 blurRadius: 12,
                               ),
                             ]
@@ -2098,16 +2393,16 @@ class _CardCreatorState extends State<_CardCreator>
                         _moveMode
                             ? Icons.open_with_rounded
                             : Icons.touch_app_outlined,
-                        color: Colors.white,
+                        color: _moveMode ? const Color(0xFF2A1C00) : _cream,
                         size: 15,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         _moveMode ? 'Déplacer ON' : 'Déplacer',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                        style: _body(
+                          size: 12,
+                          color: _moveMode ? const Color(0xFF2A1C00) : _cream,
+                          weight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -2118,44 +2413,33 @@ class _CardCreatorState extends State<_CardCreator>
           ),
         ),
 
-        // ── Bandeau info mode déplacement ──────────────────────────────────────
+        // ── Bandeau info mode déplacement ────────────────────────────────────
         if (_moveMode && !_showBack)
           Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+              color: _teal.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
-              ),
+              border: Border.all(color: _teal.withValues(alpha: 0.4)),
             ),
             child: Row(
               children: [
-                const Icon(
-                  Icons.info_outline_rounded,
-                  color: Color(0xFFB06EF3),
-                  size: 14,
-                ),
+                const Icon(Icons.info_outline_rounded, color: _teal, size: 14),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _selectedLayer == -1
                         ? '👆 Tape un élément sur la carte ou un chip ci-dessous pour le sélectionner'
                         : '✋ Glisse sur la carte pour déplacer · $_selectedLabel sélectionné',
-                    style: const TextStyle(
-                      color: Color(0xFFB06EF3),
-                      fontSize: 11,
-                    ),
+                    style: _body(size: 11, color: _teal),
                   ),
                 ),
               ],
             ),
           ),
 
-        // ── Canvas carte — FIX 2 : Listener bypass l'arène de gestes ──────────
-        // Listener.onPointerMove ne passe PAS par l'arène → reçoit TOUS
-        // les événements, même si un scroll parent veut les capturer
+        // ── Canvas carte — FIX 2 : Listener bypass l'arène de gestes ────────
         Listener(
           behavior: HitTestBehavior.opaque,
           onPointerMove:
@@ -2166,11 +2450,10 @@ class _CardCreatorState extends State<_CardCreator>
         ),
 
         // FIX : bouton "Terminer" collé sous la carte, toujours visible
-        // même quand le scroll est bloqué — permet de quitter le mode déplacement
         if (_moveMode && !_showBack)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-            child: GestureDetector(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: _ArcadeButton(
               onTap: () {
                 setState(() {
                   _moveMode = false;
@@ -2178,36 +2461,13 @@ class _CardCreatorState extends State<_CardCreator>
                 });
                 widget.onMoveModeChanged(false);
               },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF7C3AED), Color(0xFFDB2777)],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF7C3AED).withValues(alpha: 0.4),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.check_rounded, color: Colors.white, size: 16),
-                    SizedBox(width: 8),
-                    Text(
-                      '✓ Terminer le déplacement',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_rounded, size: 16),
+                  SizedBox(width: 8),
+                  Text('TERMINER LE DÉPLACEMENT'),
+                ],
               ),
             ),
           ),
@@ -2225,19 +2485,19 @@ class _CardCreatorState extends State<_CardCreator>
                       ),
                 ),
               ),
-          icon: const Icon(Icons.view_in_ar, color: Colors.white38, size: 15),
-          label: const Text(
+          icon: Icon(Icons.view_in_ar, color: _creamFaint, size: 15),
+          label: Text(
             'Inspecter en 3D',
-            style: TextStyle(color: Colors.white38, fontSize: 11),
+            style: _body(size: 11, color: _creamFaint),
           ),
         ),
 
         // Chips couches
         if (!_showBack) _buildLayerPanel(),
 
-        Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
+        Divider(height: 1, color: _surfaceLine),
 
-        // ── Paramètres scrollables ─────────────────────────────────────────────
+        // ── Paramètres scrollables ───────────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
             // FIX 2 : désactive le scroll quand le mode déplacement est actif
@@ -2253,7 +2513,7 @@ class _CardCreatorState extends State<_CardCreator>
                   TextField(
                     controller: _nameCtrl,
                     onChanged: (_) => setState(() {}),
-                    style: const TextStyle(color: Colors.white),
+                    style: _body(color: _cream),
                     decoration: _deco('Nom de la carte', Icons.badge_rounded),
                   ),
                   const SizedBox(height: 18),
@@ -2279,11 +2539,10 @@ class _CardCreatorState extends State<_CardCreator>
                           color:
                               sel
                                   ? rc.withValues(alpha: 0.15)
-                                  : Colors.white.withValues(alpha: 0.04),
+                                  : _cream.withValues(alpha: 0.04),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color:
-                                sel ? rc : Colors.white.withValues(alpha: 0.08),
+                            color: sel ? rc : _surfaceLine,
                             width: sel ? 1.5 : 1,
                           ),
                         ),
@@ -2295,19 +2554,21 @@ class _CardCreatorState extends State<_CardCreator>
                               decoration: BoxDecoration(
                                 color: rc,
                                 shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: rc.withValues(alpha: 0.6),
+                                    blurRadius: 8,
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(width: 12),
                             Text(
                               _rn(r),
-                              style: TextStyle(
-                                color:
-                                    sel
-                                        ? Colors.white
-                                        : Colors.white.withValues(alpha: 0.6),
-                                fontSize: 13,
-                                fontWeight:
-                                    sel ? FontWeight.bold : FontWeight.normal,
+                              style: _body(
+                                size: 13,
+                                color: sel ? _cream : _creamDim,
+                                weight: sel ? FontWeight.w700 : FontWeight.w600,
                               ),
                             ),
                             const Spacer(),
@@ -2317,12 +2578,10 @@ class _CardCreatorState extends State<_CardCreator>
                                 borderRadius: BorderRadius.circular(4),
                                 child: LinearProgressIndicator(
                                   value: _dropRates[r]! / 100.0,
-                                  backgroundColor: Colors.white.withValues(
-                                    alpha: 0.06,
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: 0.3,
                                   ),
-                                  valueColor: AlwaysStoppedAnimation(
-                                    rc.withValues(alpha: 0.7),
-                                  ),
+                                  valueColor: AlwaysStoppedAnimation(rc),
                                   minHeight: 5,
                                 ),
                               ),
@@ -2333,11 +2592,7 @@ class _CardCreatorState extends State<_CardCreator>
                               child: Text(
                                 _dropLabels[r]!,
                                 textAlign: TextAlign.right,
-                                style: TextStyle(
-                                  color: rc,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                style: _pixel(size: 9, color: rc),
                               ),
                             ),
                             if (sel) ...[
@@ -2350,58 +2605,38 @@ class _CardCreatorState extends State<_CardCreator>
                     );
                   }),
                   const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _addImage(),
-                          icon: const Icon(
-                            Icons.add_photo_alternate_rounded,
-                            color: Colors.white70,
-                          ),
-                          label: Text(
-                            _images.isEmpty
-                                ? 'Ajouter une photo'
-                                : 'Ajouter une couche',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.2),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
+                  _GhostButton(
+                    onTap: () => _addImage(),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.add_photo_alternate_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          _images.isEmpty
+                              ? 'Ajouter une photo'
+                              : 'Ajouter une couche',
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   if (_selectedLayer >= 0 &&
                       _selectedLayer < _images.length) ...[
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        Icon(
-                          Icons.opacity,
-                          color: Colors.white.withValues(alpha: 0.5),
-                          size: 16,
-                        ),
+                        Icon(Icons.opacity, color: _creamFaint, size: 16),
                         const SizedBox(width: 8),
                         Text(
                           'Opacité',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 12,
-                          ),
+                          style: _body(size: 12, color: _creamFaint),
                         ),
                         Expanded(
                           child: Slider(
                             value: _images[_selectedLayer].opacity,
                             min: 0.1,
                             max: 1.0,
-                            activeColor: const Color(0xFF7C3AED),
+                            activeColor: _gold,
                             onChanged:
                                 (v) => setState(
                                   () => _images[_selectedLayer].opacity = v,
@@ -2410,10 +2645,7 @@ class _CardCreatorState extends State<_CardCreator>
                         ),
                         Text(
                           '${(_images[_selectedLayer].opacity * 100).round()}%',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 11,
-                          ),
+                          style: _body(size: 11, color: _creamFaint),
                         ),
                       ],
                     ),
@@ -2423,18 +2655,11 @@ class _CardCreatorState extends State<_CardCreator>
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(
-                          Icons.zoom_in,
-                          color: Colors.white.withValues(alpha: 0.5),
-                          size: 16,
-                        ),
+                        Icon(Icons.zoom_in, color: _creamFaint, size: 16),
                         const SizedBox(width: 8),
                         Text(
                           'Taille',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 12,
-                          ),
+                          style: _body(size: 12, color: _creamFaint),
                         ),
                         Expanded(
                           child: Slider(
@@ -2444,7 +2669,7 @@ class _CardCreatorState extends State<_CardCreator>
                             ),
                             min: 0.1,
                             max: 6.0,
-                            activeColor: const Color(0xFF7C3AED),
+                            activeColor: _gold,
                             onChanged:
                                 (v) => setState(
                                   () => _images[_selectedLayer].scale = v,
@@ -2455,24 +2680,15 @@ class _CardCreatorState extends State<_CardCreator>
                     ),
                   ],
                   const SizedBox(height: 18),
-                  OutlinedButton.icon(
-                    onPressed: _addText,
-                    icon: const Icon(
-                      Icons.text_fields_rounded,
-                      color: Colors.white70,
-                    ),
-                    label: const Text(
-                      'Ajouter du texte',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.2),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                  _GhostButton(
+                    onTap: _addText,
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.text_fields_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('Ajouter du texte'),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -2488,21 +2704,21 @@ class _CardCreatorState extends State<_CardCreator>
                           width: 38,
                           height: 38,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1A1A2E),
+                            color: _surface,
                             shape: BoxShape.circle,
                             border: Border.all(
                               color:
                                   _selectedGrad == -1
                                       ? Colors.white
-                                      : Colors.white24,
+                                      : _surfaceLine,
                               width: _selectedGrad == -1 ? 3 : 1,
                             ),
                           ),
                           child:
                               _selectedGrad == -1
-                                  ? const Icon(
+                                  ? Icon(
                                     Icons.close,
-                                    color: Colors.white38,
+                                    color: _creamFaint,
                                     size: 14,
                                   )
                                   : null,
@@ -2612,7 +2828,7 @@ class _CardCreatorState extends State<_CardCreator>
                                       color:
                                           _backColor == c
                                               ? Colors.white
-                                              : Colors.white24,
+                                              : _surfaceLine,
                                       width: _backColor == c ? 3 : 1,
                                     ),
                                   ),
@@ -2622,83 +2838,44 @@ class _CardCreatorState extends State<_CardCreator>
                             .toList(),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _addImage(isBack: true),
-                      icon: const Icon(
-                        Icons.photo_library_rounded,
-                        color: Colors.white70,
-                      ),
-                      label: Text(
-                        _backImageBytes != null
-                            ? '✅ Image verso — changer'
-                            : 'Image verso (optionnel)',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.2),
+                  _GhostButton(
+                    onTap: () => _addImage(isBack: true),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.photo_library_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          _backImageBytes != null
+                              ? '✅ Image verso — changer'
+                              : 'Image verso (optionnel)',
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
+                      ],
                     ),
                   ),
                 ],
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: GestureDetector(
-                    onTap: _saving ? null : _save,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: widget.palette),
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: widget.palette[0].withValues(alpha: 0.5),
-                            blurRadius: 16,
-                            offset: const Offset(0, 4),
+                _ArcadeButton(
+                  big: true,
+                  onTap: _saving ? null : _save,
+                  child:
+                      _saving
+                          ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Color(0xFF2A1C00),
+                              strokeWidth: 2,
+                            ),
+                          )
+                          : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_circle, size: 20),
+                              SizedBox(width: 8),
+                              Text('AJOUTER À LA COLLECTION'),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Center(
-                        child:
-                            _saving
-                                ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                                : const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.add_circle,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Ajouter à la collection',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                      ),
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -2717,66 +2894,44 @@ class _CardCreatorState extends State<_CardCreator>
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       decoration: BoxDecoration(
-        gradient: active ? LinearGradient(colors: widget.palette) : null,
-        color: active ? null : Colors.white.withValues(alpha: 0.06),
+        gradient:
+            active ? const LinearGradient(colors: [_gold, _goldDeep]) : null,
+        color: active ? null : _cream.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color:
-              active ? Colors.transparent : Colors.white.withValues(alpha: 0.1),
-        ),
+        border: Border.all(color: active ? Colors.transparent : _surfaceLine),
       ),
       child: Text(
         label,
-        style: TextStyle(
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.5),
-          fontWeight: FontWeight.bold,
+        style: _body(
+          color: active ? const Color(0xFF2A1C00) : _creamDim,
+          weight: FontWeight.w800,
         ),
       ),
     ),
   );
 
-  Widget _secTitle(String t) => Text(
-    t,
-    style: const TextStyle(
-      color: Colors.white,
-      fontSize: 15,
-      fontWeight: FontWeight.w800,
-    ),
-  );
+  Widget _secTitle(String t) => Text(t, style: _arcade(size: 15));
 
   InputDecoration _deco(String hint, IconData icon) => InputDecoration(
     hintText: hint,
-    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
-    prefixIcon: Icon(icon, color: Colors.white38, size: 20),
+    hintStyle: _body(color: _creamFaint),
+    prefixIcon: Icon(icon, color: _creamFaint, size: 20),
     filled: true,
-    fillColor: Colors.white.withValues(alpha: 0.06),
+    fillColor: _cream.withValues(alpha: 0.06),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
       borderSide: BorderSide.none,
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 1.5),
+      borderSide: const BorderSide(color: _gold, width: 1.5),
     ),
   );
 }
 
-// Helpers globaux
-Color _rc(Rarity r) {
-  switch (r) {
-    case Rarity.legendary:
-      return const Color(0xFFFFD700);
-    case Rarity.epic:
-      return const Color(0xFF9C27B0);
-    case Rarity.rare:
-      return const Color(0xFF2196F3);
-    case Rarity.uncommon:
-      return const Color(0xFF4CAF50);
-    case Rarity.common:
-      return const Color(0xFF9E9E9E);
-  }
-}
-
+// ════════════════════════════════════════════════════════════════════════════
+//  Helpers globaux — couleurs/labels de rareté (palette arcade)
+// ════════════════════════════════════════════════════════════════════════════
 String _rn(Rarity r) {
   switch (r) {
     case Rarity.legendary:

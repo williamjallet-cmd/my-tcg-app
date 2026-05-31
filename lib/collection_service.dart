@@ -259,14 +259,13 @@ class CollectionService {
       return CollectionModel.fromMap(res);
     }
 
+    // On filtre seulement par id : certaines anciennes collections n'ont pas
+    // owner_user_id renseigné (uniquement owner_device_id), ce qui faisait
+    // échouer la mise à jour (PGRST116 = 0 ligne trouvée).
+    await _db.from('collections').update(updates).eq('id', collectionId);
+
     final res =
-        await _db
-            .from('collections')
-            .update(updates)
-            .eq('id', collectionId)
-            .eq('owner_user_id', _uid)
-            .select()
-            .single();
+        await _db.from('collections').select().eq('id', collectionId).single();
     return CollectionModel.fromMap(res);
   }
 
@@ -376,6 +375,24 @@ class CollectionService {
         .eq('card_id', cardId);
   }
 
+  /// True si l'utilisateur courant est admin de cette collection
+  /// (propriétaire OU membre avec le rôle 'admin').
+  Future<bool> amIAdminOf(String collectionId, String ownerUserId) async {
+    if (ownerUserId == _uid) return true;
+    try {
+      final res =
+          await _db
+              .from('collection_members')
+              .select('role')
+              .eq('collection_id', collectionId)
+              .eq('user_id', _uid)
+              .maybeSingle();
+      return res != null && res['role'] == 'admin';
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> saveUserCards(String collectionId, List<SavedCard> cards) async {
     for (final card in cards) {
       try {
@@ -410,6 +427,7 @@ class CollectionService {
       }
     }
   }
+
 
   Future<List<UserCardEntry>> loadUserCards(String collectionId) async {
     try {
