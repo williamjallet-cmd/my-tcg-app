@@ -1456,7 +1456,7 @@ class _ArcadeCard extends StatelessWidget {
                           if (card.imageBytes != null)
                             Image.memory(
                               card.imageBytes!,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                               errorBuilder:
                                   (_, __, ___) => const SizedBox.shrink(),
                             ),

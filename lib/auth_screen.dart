@@ -1,6 +1,5 @@
 // auth_screen.dart — connexion + inscription + "se souvenir de moi"
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_service.dart';
@@ -127,16 +126,7 @@ class _AuthScreenState extends State<AuthScreen>
     }
   }
 
-  Future<void> _googleSignIn() async {
-    setState(() => _loading = true);
-    try {
-      await AuthService.instance.signInWithGoogle();
-    } catch (e) {
-      _showError('Erreur Google : ${_friendlyError(e.toString())}');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
+
 
   Future<void> _resetPassword() async {
     if (_loginEmailCtrl.text.isEmpty) {
@@ -243,53 +233,6 @@ class _AuthScreenState extends State<AuthScreen>
                 ),
               ),
 
-              // Séparateur
-              Row(
-                children: [
-                  Expanded(
-                    child: Divider(color: Colors.white.withValues(alpha:0.1)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'ou',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha:0.3),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Divider(color: Colors.white.withValues(alpha:0.1)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Google (mobile uniquement)
-              if (!kIsWeb)
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _loading ? null : _googleSignIn,
-                    icon: const Icon(
-                      Icons.g_mobiledata,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    label: const Text(
-                      'Continuer avec Google',
-                      style: TextStyle(color: Colors.white, fontSize: 15),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.white.withValues(alpha:0.2)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
               const SizedBox(height: 32),
             ],
           ),

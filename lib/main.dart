@@ -250,8 +250,8 @@ class _RayBurstPainter extends CustomPainter {
   bool shouldRepaint(covariant _RayBurstPainter old) => false;
 }
 
-Widget _rayBurst(Color color, double opacity) => Positioned.fill(
-  child: IgnorePointer(
+Widget _rayBurst(Color color, double opacity, {double? height}) {
+  final content = IgnorePointer(
     child: ShaderMask(
       blendMode: BlendMode.dstIn,
       shaderCallback:
@@ -261,8 +261,11 @@ Widget _rayBurst(Color color, double opacity) => Positioned.fill(
           ).createShader(r),
       child: CustomPaint(painter: _RayBurstPainter(color, opacity)),
     ),
-  ),
-);
+  );
+  return height == null
+      ? Positioned.fill(child: content)
+      : Positioned(top: 0, left: 0, right: 0, height: height, child: content);
+}
 
 class _ScanlinePainter extends CustomPainter {
   @override
@@ -396,21 +399,26 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-
-  static const List<Widget> _screens = [
-    CollectionsScreen(),
-    FriendsScreen(),
-    ProfileScreen(),
-  ];
+  int _profileEpoch = 0;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080814),
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          const CollectionsScreen(),
+          const FriendsScreen(),
+          ProfileScreen(key: ValueKey(_profileEpoch)),
+        ],
+      ),
       bottomNavigationBar: _BottomNav(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) => setState(() {
+          _currentIndex = i;
+          if (i == 2) _profileEpoch++;
+        }),
       ),
     );
   }
@@ -1082,7 +1090,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               ),
                             ),
-                            _rayBurst(_gold, 0.07),
+                            _rayBurst(_gold, 0.07, height: 360),
                             SafeArea(
                               bottom: false,
                               child: Padding(

@@ -4,7 +4,8 @@
       "Bash(flutter analyze *)",
       "Bash(flutter build *)",
       "Bash(Remove-Item \"c:/Users/willi/tcg_app/lib/admin_screen.dart\" -Force)",
-      "Bash(rm \"c:/Users/willi/tcg_app/lib/admin_screen.dart\")"
+      "Bash(rm \"c:/Users/willi/tcg_app/lib/admin_screen.dart\")",
+      "Bash(flutter pub *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"

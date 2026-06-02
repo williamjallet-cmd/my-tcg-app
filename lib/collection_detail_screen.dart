@@ -30,6 +30,7 @@ import 'card_model.dart';
 import 'pack_opening_screen.dart';
 import 'card_inspector_screen.dart';
 import 'pack_customizer_screen.dart';
+import 'manage_members_screen.dart';
 import 'streak_service.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -431,6 +432,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Set<String> _catalogueIds = {};
   bool _loading = true;
   String _sortBy = 'rarity';
+  bool _sortAsc = true;
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
   // TabBarView (gauche/droite) ET NestedScrollView (haut/bas)
   bool _cardMoveMode = false;
@@ -465,6 +467,26 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         Icon(Icons.tune_rounded, size: 18),
         SizedBox(width: 8),
         Text('Personnaliser le pack'),
+      ],
+    ),
+  );
+
+  Widget _manageMembersBtn() => _GhostButton(
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ManageMembersScreen(
+          collection: _col,
+          myUserId: widget.myUserId,
+        ),
+      ),
+    ),
+    child: const Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.group_rounded, size: 18),
+        SizedBox(width: 8),
+        Text('Gérer les membres'),
       ],
     ),
   );
@@ -523,36 +545,55 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   }
 
   Future<void> _loadCards() async {
-    if (mounted) setState(() => _loading = true);
     final prefs = await SharedPreferences.getInstance();
-    List<SavedCard> all = await CardStorage.loadCards();
-    Set<String> obtIds =
+    final List<SavedCard> all = await CardStorage.loadCards();
+    final Set<String> obtIds =
         (prefs.getStringList(_obtKey(widget.collection.id)) ?? []).toSet();
+    final Set<String> catIds =
+        (prefs.getStringList(_catKey(widget.collection.id)) ?? []).toSet();
+
+    // 1) Affichage immédiat depuis le cache local (aucune attente réseau)
+    if (mounted) {
+      setState(() {
+        _allCards = all;
+        _obtainedCards = all.where((c) => obtIds.contains(c.id)).toList();
+        _catalogueIds = catIds;
+        _loading = all.isEmpty && catIds.isEmpty;
+      });
+    }
+
+    // 2) Synchronisation Supabase en arrière-plan (ne bloque pas l'affichage)
     try {
       final remoteEntries = await CollectionService.instance.loadUserCards(
         widget.collection.id,
       );
+      final newCards = <SavedCard>[];
       for (final entry in remoteEntries) {
         obtIds.add(entry.cardId);
-        if (!all.any((c) => c.id == entry.cardId)) {
+        final alreadyLocal = all.any((c) => c.id == entry.cardId);
+        final alreadyQueued = newCards.any((c) => c.id == entry.cardId);
+        if (!alreadyLocal && !alreadyQueued) {
           final reconstructed = entry.toSavedCard();
-          if (reconstructed != null) {
-            await CardStorage.addCard(reconstructed);
-            all.add(reconstructed);
-          }
+          if (reconstructed != null) newCards.add(reconstructed);
         }
+      }
+      if (newCards.isNotEmpty) {
+        await CardStorage.addCards(newCards);
+        all.addAll(newCards);
       }
       await prefs.setStringList(_obtKey(widget.collection.id), obtIds.toList());
     } catch (_) {}
-    Set<String> catIds = {};
+
     try {
       catIds.addAll(
         await CollectionService.instance.getCollectionCardIds(
           widget.collection.id,
         ),
       );
+      await prefs.setStringList(_catKey(widget.collection.id), catIds.toList());
     } catch (_) {}
-    catIds.addAll(prefs.getStringList(_catKey(widget.collection.id)) ?? []);
+
+    // 3) Mise à jour finale après la synchro réseau
     if (mounted) {
       setState(() {
         _allCards = all;
@@ -631,10 +672,17 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   List<SavedCard> _sorted(List<SavedCard> cards) {
     final l = [...cards];
-    if (_sortBy == 'rarity') {
-      l.sort((a, b) => b.rarity.index.compareTo(a.rarity.index));
+    int cmp(SavedCard a, SavedCard b) {
+      switch (_sortBy) {
+        case 'rarity':
+          return a.rarity.index.compareTo(b.rarity.index);
+        case 'name':
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        default:
+          return 0;
+      }
     }
-    if (_sortBy == 'name') l.sort((a, b) => a.name.compareTo(b.name));
+    l.sort((a, b) => _sortAsc ? cmp(a, b) : cmp(b, a));
     return l;
   }
 
@@ -817,6 +865,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
           const SizedBox(height: 12),
           _customizePackBtn(),
         ],
+        if (_isAdmin) ...[
+          const SizedBox(height: 12),
+          _manageMembersBtn(),
+        ],
         const SizedBox(height: 28),
         _secTitle('Taux de drop'),
         const SizedBox(height: 12),
@@ -970,6 +1022,27 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                 child: Text(
                   'TRIER',
                   style: _pixel(size: 8, color: _creamFaint),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => setState(() => _sortAsc = !_sortAsc),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _cream.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: _surfaceLine, width: 1.5),
+                    ),
+                    child: Text(
+                      _sortAsc ? '⬆️ Croissant' : '⬇️ Décroissant',
+                      style: _pixel(size: 9, color: _cream),
+                    ),
+                  ),
                 ),
               ),
               ...[

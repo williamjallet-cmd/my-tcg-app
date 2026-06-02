@@ -604,11 +604,7 @@ class _CollectionCardState extends State<_CollectionCard> {
               value: 'edit',
               child: Row(
                 children: [
-                  Icon(
-                    Icons.edit_rounded,
-                    color: Arcade.creamDim,
-                    size: 18,
-                  ),
+                  Icon(Icons.edit_rounded, color: Arcade.creamDim, size: 18),
                   const SizedBox(width: 10),
                   Text('Modifier', style: Arcade.body()),
                 ],
@@ -924,11 +920,7 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.people_rounded,
-                  color: Arcade.creamDim,
-                  size: 20,
-                ),
+                Icon(Icons.people_rounded, color: Arcade.creamDim, size: 20),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1162,11 +1154,7 @@ class _CreateCollectionScreenState extends State<_CreateCollectionScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.people_rounded,
-                    color: Arcade.creamDim,
-                    size: 22,
-                  ),
+                  Icon(Icons.people_rounded, color: Arcade.creamDim, size: 22),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
