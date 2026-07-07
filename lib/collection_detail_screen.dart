@@ -442,6 +442,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   bool _isAdmin = false;
 
+  // Onglet Admin : 'menu' | 'create' | 'delete'
+  String _adminMode = 'menu';
+
   @override
   void initState() {
     super.initState();
@@ -472,15 +475,17 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   );
 
   Widget _manageMembersBtn() => _GhostButton(
-    onTap: () => Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ManageMembersScreen(
-          collection: _col,
-          myUserId: widget.myUserId,
+    onTap:
+        () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder:
+                (_) => ManageMembersScreen(
+                  collection: _col,
+                  myUserId: widget.myUserId,
+                ),
+          ),
         ),
-      ),
-    ),
     child: const Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -682,6 +687,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
           return 0;
       }
     }
+
     l.sort((a, b) => _sortAsc ? cmp(a, b) : cmp(b, a));
     return l;
   }
@@ -735,10 +741,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                     indicatorWeight: 3,
                     indicatorSize: TabBarIndicatorSize.label,
                     dividerColor: Colors.transparent,
-                    tabs: const [
-                      Tab(text: '🎁 Pack'),
-                      Tab(text: '🃏 Cartes'),
-                      Tab(text: '✏️ Créer'),
+                    tabs: [
+                      const Tab(text: '🎁 Pack'),
+                      const Tab(text: '🃏 Cartes'),
+                      Tab(text: _isAdmin ? '🛠️ Admin' : '✏️ Créer'),
                     ],
                   ),
                 ),
@@ -755,7 +761,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                                 _cardMoveMode
                                     ? const NeverScrollableScrollPhysics()
                                     : const ScrollPhysics(),
-                            children: [_packTab(p), _cardsTab(), _createTab(p)],
+                            children: [
+                              _packTab(p),
+                              _cardsTab(),
+                              _isAdmin ? _adminTab(p) : _createTab(p),
+                            ],
                           ),
                 ),
               ],
@@ -865,10 +875,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
           const SizedBox(height: 12),
           _customizePackBtn(),
         ],
-        if (_isAdmin) ...[
-          const SizedBox(height: 12),
-          _manageMembersBtn(),
-        ],
+        if (_isAdmin) ...[const SizedBox(height: 12), _manageMembersBtn()],
         const SizedBox(height: 28),
         _secTitle('Taux de drop'),
         const SizedBox(height: 12),
@@ -1130,12 +1137,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       ),
       itemCount: cards.length,
       itemBuilder:
-          (_, i) => _CardTile(
-            card: cards[i],
-            revealed: obtIds.contains(cards[i].id),
-            isAdmin: _isAdmin,
-            onDelete: _isAdmin ? () => _confirmDeleteCard(cards[i]) : null,
-          ),
+          (_, i) =>
+              _CardTile(card: cards[i], revealed: obtIds.contains(cards[i].id)),
     );
   }
 
@@ -1203,6 +1206,194 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       _tabCtrl.animateTo(1);
     },
   );
+
+  // ════════════════════════════════════════════════════════════════════════
+  //   ONGLET ADMIN — réservé aux admins (Créer / Supprimer une carte)
+  // ════════════════════════════════════════════════════════════════════════
+  Widget _adminTab(List<Color> p) {
+    if (_adminMode == 'create') return _adminCreateView(p);
+    if (_adminMode == 'delete') return _adminDeleteView();
+    return _adminMenu();
+  }
+
+  // Menu de choix : Créer ou Supprimer
+  Widget _adminMenu() => SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      children: [
+        const SizedBox(height: 8),
+        Text('Espace admin', style: _arcade(size: 20)),
+        const SizedBox(height: 6),
+        Text(
+          'Gère les cartes de cette collection.',
+          textAlign: TextAlign.center,
+          style: _body(size: 13.5, color: _creamDim),
+        ),
+        const SizedBox(height: 28),
+        _adminMenuCard(
+          emoji: '✏️',
+          title: 'Créer une carte',
+          subtitle: 'Ajoute une nouvelle carte à la collection',
+          color: _teal,
+          onTap: () => setState(() => _adminMode = 'create'),
+        ),
+        const SizedBox(height: 16),
+        _adminMenuCard(
+          emoji: '🗑️',
+          title: 'Supprimer une carte',
+          subtitle: 'Retire une carte de la collection',
+          color: _coral,
+          onTap: () => setState(() => _adminMode = 'delete'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _adminMenuCard({
+    required String emoji,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(emoji, style: const TextStyle(fontSize: 26)),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: _arcade(size: 16)),
+                const SizedBox(height: 4),
+                Text(subtitle, style: _body(size: 12.5, color: _creamDim)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: color),
+        ],
+      ),
+    ),
+  );
+
+  // Barre « Retour » affichée en haut des sous-écrans Créer / Supprimer
+  Widget _adminBackBar(String title) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+    child: Row(
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _adminMode = 'menu'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _cream.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _surfaceLine, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.arrow_back_rounded, size: 16, color: _cream),
+                const SizedBox(width: 6),
+                Text('Retour', style: _body(size: 12.5, color: _cream)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(title, style: _arcade(size: 15)),
+      ],
+    ),
+  );
+
+  // Sous-écran « Créer » : exactement le créateur de carte habituel
+  Widget _adminCreateView(List<Color> p) => Column(
+    children: [
+      _adminBackBar('Créer une carte'),
+      Expanded(
+        child: _CardCreator(
+          palette: p,
+          collectionId: widget.collection.id,
+          onMoveModeChanged: (v) => setState(() => _cardMoveMode = v),
+          onSaved: () {
+            _msg('✅ Carte ajoutée !');
+            _loadCards();
+            setState(() => _adminMode = 'menu');
+            _tabCtrl.animateTo(1);
+          },
+        ),
+      ),
+    ],
+  );
+
+  // Sous-écran « Supprimer » : toutes les cartes de la collection,
+  // avec un bouton de suppression sur chacune.
+  Widget _adminDeleteView() {
+    final cards = _sorted(_catalogue);
+    return Column(
+      children: [
+        _adminBackBar('Supprimer une carte'),
+        Expanded(
+          child:
+              cards.isEmpty
+                  ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '🃏',
+                          style: TextStyle(
+                            fontSize: 50,
+                            color: _cream.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Aucune carte à supprimer',
+                          style: _arcade(size: 15, color: _creamFaint),
+                        ),
+                      ],
+                    ),
+                  )
+                  : GridView.builder(
+                    padding: const EdgeInsets.all(14),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 0.7,
+                        ),
+                    itemCount: cards.length,
+                    itemBuilder:
+                        (_, i) => _CardTile(
+                          card: cards[i],
+                          revealed: true,
+                          isAdmin: true,
+                          onDelete: () => _confirmDeleteCard(cards[i]),
+                        ),
+                  ),
+        ),
+      ],
+    );
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1414,7 +1605,11 @@ class _CardTile extends StatelessWidget {
             children: [
               if (card.imageBytes != null)
                 Positioned.fill(
-                  child: Image.memory(card.imageBytes!, fit: BoxFit.cover, cacheWidth: 400),
+                  child: Image.memory(
+                    card.imageBytes!,
+                    fit: BoxFit.cover,
+                    cacheWidth: 400,
+                  ),
                 ),
               Positioned(
                 bottom: 0,

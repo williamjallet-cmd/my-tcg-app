@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'collection_detail_screen.dart';
+import 'daily_reward_card.dart';
 import 'arcade_theme.dart';
 
 // Accent arcade par collection (déterministe sur l'id) — or / teal / corail / épique
@@ -260,6 +261,16 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                     onPressed: _load,
                   ),
                 ],
+              ),
+              // ── Bandeau « Récompense du jour » ──────────────────────────
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: DailyRewardBanner(
+                    collections: _collections,
+                    onClaimed: _load,
+                  ),
+                ),
               ),
               if (_loading)
                 const SliverFillRemaining(
