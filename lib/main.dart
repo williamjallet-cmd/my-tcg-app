@@ -415,10 +415,11 @@ class _MainScreenState extends State<MainScreen> {
       ),
       bottomNavigationBar: _BottomNav(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() {
-          _currentIndex = i;
-          if (i == 2) _profileEpoch++;
-        }),
+        onTap:
+            (i) => setState(() {
+              _currentIndex = i;
+              if (i == 2) _profileEpoch++;
+            }),
       ),
     );
   }
@@ -772,7 +773,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
             children: [
               if (card.imageBytes != null)
                 Positioned.fill(
-                  child: Image.memory(card.imageBytes!, fit: BoxFit.cover),
+                  child: Image.memory(
+                    card.imageBytes!,
+                    fit: BoxFit.cover,
+                    cacheWidth: 400,
+                  ),
                 ),
               Positioned(
                 bottom: 0,

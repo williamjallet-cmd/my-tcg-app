@@ -5,7 +5,8 @@
       "Bash(flutter build *)",
       "Bash(Remove-Item \"c:/Users/willi/tcg_app/lib/admin_screen.dart\" -Force)",
       "Bash(rm \"c:/Users/willi/tcg_app/lib/admin_screen.dart\")",
-      "Bash(flutter pub *)"
+      "Bash(flutter pub *)",
+      "PowerShell(Copy-Item \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\Card media service � DART\" \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card_media_service.dart\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"

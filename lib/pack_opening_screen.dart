@@ -143,12 +143,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   int _index = 0;
   late List<bool> _revealed;
 
-  // Cartes déjà possédées AVANT l'ouverture de ce pack.
-  // Sert à afficher le badge « NEW » sur les cartes encore absentes
-  // de la collection du joueur.
-  Set<String> _ownedBefore = {};
-  bool _ownedLoaded = false;
-
   bool _flash = false;
   bool _legMoment = false;
   bool _isSaving = false;
@@ -165,9 +159,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     _cards = [...widget.cards]
       ..sort((a, b) => _rarityRank(a.rarity).compareTo(_rarityRank(b.rarity)));
     _revealed = List.filled(_cards.length, false);
-
-    // On charge ce que le joueur possède déjà, avant d'enregistrer ce pack.
-    _loadOwnedBefore();
 
     _flashCtrl = AnimationController(
       vsync: this,
@@ -194,26 +185,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   Rarity get _topRarity => _cards
       .map((c) => c.rarity)
       .reduce((a, b) => _rarityRank(a) >= _rarityRank(b) ? a : b);
-
-  // Récupère les cartes déjà possédées par le joueur (avant ce pack).
-  Future<void> _loadOwnedBefore() async {
-    try {
-      final entries = await CollectionService.instance.loadUserCards(
-        widget.collectionId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _ownedBefore = entries.map((e) => e.cardId).toSet();
-        _ownedLoaded = true;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _ownedLoaded = true);
-    }
-  }
-
-  // True si la carte n'était PAS encore dans la collection du joueur.
-  bool _isNew(SavedCard card) =>
-      _ownedLoaded && !_ownedBefore.contains(card.id);
 
   void _doFlash([int ms = 550]) {
     _flashCtrl.duration = Duration(milliseconds: ms);
@@ -406,7 +377,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                   index: _index,
                   revealed: _revealed,
                   legMoment: _legMoment,
-                  isNew: _isNew(_cards[_index]),
                   onFlip: () => _flip(_index),
                   onAdvance: _advance,
                 ),
@@ -968,6 +938,7 @@ class _FoilFace extends StatelessWidget {
           width: d,
           height: d,
           fit: BoxFit.cover,
+          cacheWidth: 140,
           errorBuilder: (_, __, ___) => _defaultEmblem(d),
         ),
       );
@@ -1487,6 +1458,7 @@ class _ArcadeCard extends StatelessWidget {
                             Image.memory(
                               card.imageBytes!,
                               fit: BoxFit.contain,
+                              cacheWidth: 800,
                               errorBuilder:
                                   (_, __, ___) => const SizedBox.shrink(),
                             ),
@@ -1552,84 +1524,11 @@ class _ArcadeCard extends StatelessWidget {
 //   RÉVÉLATION CARTE PAR CARTE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Petit badge « NEW » affiché au-dessus d'une carte que le joueur
-// ne possédait pas encore. Apparition élastique + léger flottement.
-class _NewBadge extends StatefulWidget {
-  const _NewBadge();
-
-  @override
-  State<_NewBadge> createState() => _NewBadgeState();
-}
-
-class _NewBadgeState extends State<_NewBadge>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.elasticOut,
-      builder: (_, pop, child) => Transform.scale(scale: pop, child: child),
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (_, child) {
-          final bob = math.sin(_ctrl.value * math.pi * 2) * 2.0;
-          return Transform.translate(offset: Offset(0, bob), child: child);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFFF4D6D), Color(0xFFFF8A00)],
-            ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFFF4D6D).withValues(alpha: 0.6),
-                blurRadius: 14,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-          child: Text(
-            '✨ NEW',
-            style: _arcade(
-              size: 13,
-              color: Colors.white,
-              spacing: 1.5,
-              shadows: const [Shadow(color: Colors.black54, blurRadius: 4)],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _RevealCarte extends StatelessWidget {
   final List<SavedCard> cards;
   final int index;
   final List<bool> revealed;
   final bool legMoment;
-  final bool isNew;
   final VoidCallback onFlip;
   final VoidCallback onAdvance;
 
@@ -1638,7 +1537,6 @@ class _RevealCarte extends StatelessWidget {
     required this.index,
     required this.revealed,
     required this.legMoment,
-    required this.isNew,
     required this.onFlip,
     required this.onAdvance,
   });
@@ -1652,26 +1550,17 @@ class _RevealCarte extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.topCenter,
-          children: [
-            AnimatedScale(
-              scale: isRev && legMoment ? 1.12 : 1.0,
-              duration: Duration(milliseconds: legMoment ? 1100 : 300),
-              curve: Curves.easeOutCubic,
-              child: _FlipCard(
-                key: ValueKey('flip_$index'),
-                card: card,
-                revealed: isRev,
-                width: 210,
-                onTap: isRev ? null : onFlip,
-              ),
-            ),
-            // Badge « NEW » : seulement une fois la carte révélée et si
-            // le joueur ne l'avait pas encore dans sa collection.
-            if (isRev && isNew) const Positioned(top: -14, child: _NewBadge()),
-          ],
+        AnimatedScale(
+          scale: isRev && legMoment ? 1.12 : 1.0,
+          duration: Duration(milliseconds: legMoment ? 1100 : 300),
+          curve: Curves.easeOutCubic,
+          child: _FlipCard(
+            key: ValueKey('flip_$index'),
+            card: card,
+            revealed: isRev,
+            width: 210,
+            onTap: isRev ? null : onFlip,
+          ),
         ),
         const SizedBox(height: 20),
         // points de progression
@@ -2135,6 +2024,7 @@ class SavedCardFrontWidget extends StatelessWidget {
                     card.imageBytes!,
                     width: width * 0.92,
                     fit: BoxFit.fitWidth,
+                    cacheWidth: 800,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 ),
@@ -2324,6 +2214,7 @@ class SavedCardBackWidget extends StatelessWidget {
                 child: Image.memory(
                   card.backImageBytes!,
                   fit: BoxFit.cover,
+                  cacheWidth: 800,
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),

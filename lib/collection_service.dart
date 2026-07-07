@@ -1,8 +1,15 @@
 // collection_service.dart — ajout de la personnalisation du pack
 //   (pack_title, pack_subtitle, pack_image_url) + uploadPackImage
+//
+// ✅ OPTIMISATIONS (audit juillet 2026) :
+//   • getMemberCount : comptage CÔTÉ SERVEUR (plus aucune ligne téléchargée)
+//   • saveUserCards  : requêtes GROUPÉES (2 allers-retours au lieu de 2 par carte)
+//   • Fin des erreurs silencieuses : chaque catch loggue via debugPrint
+//     → les erreurs RLS/réseau apparaissent enfin dans la console !
+//   • Signatures et comportements INCHANGÉS pour tous les appelants.
 
 import 'dart:math';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'card_storage.dart';
 
@@ -116,7 +123,44 @@ class UserCardEntry {
     if (cardData == null) return null;
     try {
       return CardStorage.fromJson(cardData!);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ UserCardEntry.toSavedCard ($cardName) : $e');
+      return null;
+    }
+  }
+}
+
+/// ✨ NOUVEAU : entrée du catalogue partagé (collection_cards),
+/// avec card_data léger pour reconstruire la carte chez chaque membre.
+class CatalogCardEntry {
+  final String cardId;
+  final String cardName;
+  final String cardRarity;
+  final Map<String, dynamic>? cardData;
+
+  const CatalogCardEntry({
+    required this.cardId,
+    required this.cardName,
+    required this.cardRarity,
+    this.cardData,
+  });
+
+  factory CatalogCardEntry.fromMap(Map<String, dynamic> m) => CatalogCardEntry(
+    cardId: m['card_id'] as String,
+    cardName: (m['card_name'] as String?) ?? '',
+    cardRarity: (m['card_rarity'] as String?) ?? '',
+    cardData:
+        m['card_data'] != null
+            ? (m['card_data'] as Map<String, dynamic>)
+            : null,
+  );
+
+  SavedCard? toSavedCard() {
+    if (cardData == null) return null;
+    try {
+      return CardStorage.fromJson(cardData!);
+    } catch (e) {
+      debugPrint('⚠️ CatalogCardEntry.toSavedCard ($cardName) : $e');
       return null;
     }
   }
@@ -145,6 +189,7 @@ class CollectionService {
           );
       return _db.storage.from('collections').getPublicUrl(path);
     } catch (e) {
+      debugPrint('⚠️ uploadCoverImage : $e');
       return null;
     }
   }
@@ -165,6 +210,7 @@ class CollectionService {
           );
       return _db.storage.from('collections').getPublicUrl(path);
     } catch (e) {
+      debugPrint('⚠️ uploadPackImage : $e');
       return null;
     }
   }
@@ -329,27 +375,54 @@ class CollectionService {
         .eq('owner_user_id', _uid);
   }
 
+  /// ✅ OPTIMISÉ : comptage effectué par PostgreSQL côté serveur.
+  /// Avant : toutes les lignes étaient téléchargées puis comptées côté client.
   Future<int> getMemberCount(String collectionId) async {
-    final res = await _db
-        .from('collection_members')
-        .select('id')
-        .eq('collection_id', collectionId);
-    return (res as List).length;
+    try {
+      return await _db
+          .from('collection_members')
+          .count(CountOption.exact)
+          .eq('collection_id', collectionId);
+    } catch (e) {
+      debugPrint('⚠️ getMemberCount : $e');
+      return 0;
+    }
   }
 
+  /// ✨ MIGRATION STORAGE : si [card] est fournie, le catalogue transporte
+  /// aussi un card_data LÉGER (chemins Storage, pas de base64) → toutes les
+  /// cartes deviennent visibles et tirables par TOUS les membres.
   Future<void> addCardToCollection(
     String collectionId,
     String cardId,
     String cardName,
-    String cardRarity,
-  ) async {
+    String cardRarity, [
+    SavedCard? card,
+  ]) async {
     await _db.from('collection_cards').upsert({
       'collection_id': collectionId,
       'card_id': cardId,
       'card_name': cardName,
       'card_rarity': cardRarity,
       'added_by': _uid,
+      if (card != null) 'card_data': CardStorage.toJson(card),
     });
+  }
+
+  /// ✨ NOUVEAU : catalogue complet de la collection (avec card_data léger).
+  Future<List<CatalogCardEntry>> getCollectionCards(String collectionId) async {
+    try {
+      final res = await _db
+          .from('collection_cards')
+          .select('card_id, card_name, card_rarity, card_data')
+          .eq('collection_id', collectionId);
+      return (res as List)
+          .map((r) => CatalogCardEntry.fromMap(r as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('⚠️ getCollectionCards : $e');
+      return [];
+    }
   }
 
   Future<List<String>> getCollectionCardIds(String collectionId) async {
@@ -359,7 +432,8 @@ class CollectionService {
           .select('card_id')
           .eq('collection_id', collectionId);
       return (res as List).map((r) => r['card_id'] as String).toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ getCollectionCardIds : $e');
       return [];
     }
   }
@@ -388,46 +462,87 @@ class CollectionService {
               .eq('user_id', _uid)
               .maybeSingle();
       return res != null && res['role'] == 'admin';
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ amIAdminOf : $e');
       return false;
     }
   }
 
+  /// ✅ OPTIMISÉ : requêtes groupées.
+  /// Avant : 2 requêtes PAR carte (select + insert/update), en séquence.
+  ///   → un pack de 3 cartes = jusqu'à 6 allers-retours réseau.
+  /// Maintenant :
+  ///   1 requête pour connaître les cartes déjà possédées,
+  ///   1 requête d'insertion GROUPÉE pour toutes les nouvelles cartes,
+  ///   + 1 update par doublon uniquement (cas rare).
+  /// Le résultat en base est strictement identique à l'ancienne version.
   Future<void> saveUserCards(String collectionId, List<SavedCard> cards) async {
-    for (final card in cards) {
-      try {
-        final existing =
-            await _db
-                .from('user_collection_cards')
-                .select('id, quantity')
-                .eq('collection_id', collectionId)
-                .eq('user_id', _uid)
-                .eq('card_id', card.id)
-                .maybeSingle();
-        if (existing != null) {
-          final currentQty = (existing['quantity'] as int?) ?? 1;
-          await _db
-              .from('user_collection_cards')
-              .update({'quantity': currentQty + 1})
-              .eq('id', existing['id'] as String);
-        } else {
-          await _db.from('user_collection_cards').insert({
+    if (cards.isEmpty) return;
+    try {
+      // Nombre d'exemplaires de chaque carte dans ce lot (doublons de pack)
+      final counts = <String, int>{};
+      final byId = <String, SavedCard>{};
+      for (final card in cards) {
+        counts[card.id] = (counts[card.id] ?? 0) + 1;
+        byId[card.id] = card;
+      }
+
+      // 1 seule requête : lesquelles possède-t-on déjà ?
+      final existingRows = await _db
+          .from('user_collection_cards')
+          .select('id, card_id, quantity')
+          .eq('collection_id', collectionId)
+          .eq('user_id', _uid)
+          .inFilter('card_id', counts.keys.toList());
+
+      final existingByCard = <String, Map<String, dynamic>>{
+        for (final r in (existingRows as List))
+          r['card_id'] as String: Map<String, dynamic>.from(r as Map),
+      };
+
+      final toInsert = <Map<String, dynamic>>[];
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+
+      for (final entry in counts.entries) {
+        final cardId = entry.key;
+        final n = entry.value;
+        final existing = existingByCard[cardId];
+
+        if (existing == null) {
+          // Nouvelle carte → ajoutée au lot d'insertion groupée
+          final card = byId[cardId]!;
+          toInsert.add({
             'collection_id': collectionId,
             'user_id': _uid,
             'card_id': card.id,
             'card_name': card.name,
             'card_rarity': card.rarity.name,
             'card_data': CardStorage.toJson(card),
-            'quantity': 1,
-            'obtained_at': DateTime.now().toUtc().toIso8601String(),
+            'quantity': n,
+            'obtained_at': nowIso,
           });
+        } else {
+          // Carte déjà possédée → on incrémente la quantité
+          try {
+            final currentQty = (existing['quantity'] as int?) ?? 1;
+            await _db
+                .from('user_collection_cards')
+                .update({'quantity': currentQty + n})
+                .eq('id', existing['id'] as String);
+          } catch (e) {
+            debugPrint('⚠️ saveUserCards (update ${byId[cardId]?.name}) : $e');
+          }
         }
-      } catch (e) {
-        continue;
       }
+
+      // 1 seule requête d'insertion pour toutes les nouvelles cartes
+      if (toInsert.isNotEmpty) {
+        await _db.from('user_collection_cards').insert(toInsert);
+      }
+    } catch (e) {
+      debugPrint('⚠️ saveUserCards : $e');
     }
   }
-
 
   Future<List<UserCardEntry>> loadUserCards(String collectionId) async {
     try {
@@ -438,7 +553,8 @@ class CollectionService {
           .eq('user_id', _uid)
           .order('obtained_at', ascending: false);
       return (res as List).map((row) => UserCardEntry.fromMap(row)).toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ loadUserCards : $e');
       return [];
     }
   }

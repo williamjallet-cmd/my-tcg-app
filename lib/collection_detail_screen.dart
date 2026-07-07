@@ -18,6 +18,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,6 +27,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'card_storage.dart';
+import 'card_media_service.dart';
 import 'card_model.dart';
 import 'pack_opening_screen.dart';
 import 'card_inspector_screen.dart';
@@ -583,20 +585,42 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         }
       }
       if (newCards.isNotEmpty) {
-        await CardStorage.addCards(newCards);
-        all.addAll(newCards);
+        // ✨ Nouveau format léger : télécharge les images depuis Storage
+        final hydrated = await CardMediaService.instance.hydrateAll(newCards);
+        await CardStorage.addCards(hydrated);
+        all.addAll(hydrated);
       }
       await prefs.setStringList(_obtKey(widget.collection.id), obtIds.toList());
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ Sync cartes Supabase (loadUserCards) : $e');
+    }
 
     try {
-      catIds.addAll(
-        await CollectionService.instance.getCollectionCardIds(
-          widget.collection.id,
-        ),
+      final catalog = await CollectionService.instance.getCollectionCards(
+        widget.collection.id,
       );
+      catIds.addAll(catalog.map((e) => e.cardId));
+
+      // ✨ NOUVEAU : reconstruit les cartes créées par les AUTRES membres
+      // (card_data léger du catalogue + images sur Supabase Storage)
+      final missing = <SavedCard>[];
+      for (final e in catalog) {
+        if (e.cardData == null) continue;
+        if (all.any((c) => c.id == e.cardId)) continue;
+        if (missing.any((c) => c.id == e.cardId)) continue;
+        final rebuilt = e.toSavedCard();
+        if (rebuilt != null) missing.add(rebuilt);
+      }
+      if (missing.isNotEmpty) {
+        final hydrated = await CardMediaService.instance.hydrateAll(missing);
+        await CardStorage.addCards(hydrated);
+        all.addAll(hydrated);
+      }
+
       await prefs.setStringList(_catKey(widget.collection.id), catIds.toList());
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ Sync catalogue Supabase (getCollectionCards) : $e');
+    }
 
     // 3) Mise à jour finale après la synchro réseau
     if (mounted) {
@@ -621,6 +645,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       _msg('❌ Crée des cartes dans l\'onglet ✏️ d\'abord !', err: true);
       return;
     }
+    // ✨ Retour haptique : le pack s'ouvre !
+    HapticFeedback.mediumImpact();
     final rng = math.Random();
     final packCards = List.generate(3, (_) => _weightedPick(pool, rng));
     await PackSystem.setLastOpenedTime(widget.collection.id);
@@ -1137,8 +1163,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       ),
       itemCount: cards.length,
       itemBuilder:
-          (_, i) =>
-              _CardTile(card: cards[i], revealed: obtIds.contains(cards[i].id)),
+          (_, i) => RepaintBoundary(
+            child: _CardTile(
+              card: cards[i],
+              revealed: obtIds.contains(cards[i].id),
+            ),
+          ),
     );
   }
 
@@ -1189,6 +1219,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         card.id,
       );
       await CardStorage.deleteCard(card.id);
+      // ✨ Nettoyage best-effort des images sur Supabase Storage
+      await CardMediaService.instance.deleteCardImages(card);
       _msg('🗑️ Carte supprimée.');
       await _loadCards();
     } catch (e) {
@@ -1383,11 +1415,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                         ),
                     itemCount: cards.length,
                     itemBuilder:
-                        (_, i) => _CardTile(
-                          card: cards[i],
-                          revealed: true,
-                          isAdmin: true,
-                          onDelete: () => _confirmDeleteCard(cards[i]),
+                        (_, i) => RepaintBoundary(
+                          child: _CardTile(
+                            card: cards[i],
+                            revealed: true,
+                            isAdmin: true,
+                            onDelete: () => _confirmDeleteCard(cards[i]),
+                          ),
                         ),
                   ),
         ),
@@ -2178,6 +2212,7 @@ class _CardCreatorState extends State<_CardCreator>
                   width: 24,
                   height: 24,
                   fit: BoxFit.cover,
+                  cacheWidth: 48,
                 ),
               )
             else
@@ -2478,7 +2513,11 @@ class _CardCreatorState extends State<_CardCreator>
         children: [
           if (_backImageBytes != null)
             Positioned.fill(
-              child: Image.memory(_backImageBytes!, fit: BoxFit.cover),
+              child: Image.memory(
+                _backImageBytes!,
+                fit: BoxFit.cover,
+                cacheWidth: 400,
+              ),
             ),
           if (_backImageBytes == null)
             Center(
@@ -2543,15 +2582,20 @@ class _CardCreatorState extends State<_CardCreator>
         textZones: List.from(_textZones),
       );
 
-      await CardStorage.addCard(card);
+      // ✨ MIGRATION STORAGE : upload des images vers Supabase Storage.
+      // En cas d'échec (hors-ligne…), la carte garde son base64 : rien ne casse.
+      final uploaded = await CardMediaService.instance.uploadCardImages(card);
+
+      await CardStorage.addCard(uploaded);
 
       bool supabaseOk = false;
       try {
         await CollectionService.instance.addCardToCollection(
           widget.collectionId,
-          card.id,
-          card.name,
+          uploaded.id,
+          uploaded.name,
           _rn(_rarity),
+          uploaded, // card_data léger → carte partagée avec tous les membres
         );
         supabaseOk = true;
       } catch (e) {

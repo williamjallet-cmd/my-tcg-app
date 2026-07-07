@@ -3,13 +3,18 @@
 //    - SharedPreferences ne garde plus que de petites métadonnées → rapide
 //    - plus d'encodage/décodage base64 géant à chaque chargement / écriture
 //    - migration AUTOMATIQUE et NON destructive depuis l'ancien format
-//    - le format Supabase (toJson / fromJson, base64) est INCHANGÉ
-//      → la synchro multi-appareils continue de fonctionner comme avant
+// ✅ v4 (migration Supabase Storage, juillet 2026) :
+//    - SavedCard/ExtraImage portent des CHEMINS Supabase Storage optionnels
+//      (imagePath, backImagePath, ExtraImage.path)
+//    - toJson (format réseau) : si un chemin existe → on envoie LE CHEMIN
+//      et plus le base64 → card_data devient minuscule
+//    - fromJson : accepte les DEUX formats (base64 des anciennes cartes,
+//      chemins des nouvelles) → 100 % rétro-compatible, rien à migrer
+//    - le téléchargement des images se fait via CardMediaService
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // compute()
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,18 +28,31 @@ class ExtraImage {
   final Uint8List bytes;
   final double x, y, scale;
 
-  ExtraImage({required this.bytes, this.x = 0, this.y = 0, this.scale = 1.0});
+  /// Chemin Supabase Storage (nouveau format). Null pour les anciennes cartes.
+  final String? path;
 
-  // Format réseau (Supabase) — INCHANGÉ
+  ExtraImage({
+    required this.bytes,
+    this.x = 0,
+    this.y = 0,
+    this.scale = 1.0,
+    this.path,
+  });
+
+  // Format réseau (Supabase)
+  // → chemin Storage si dispo (léger), sinon base64 (rétro-compat)
   Map<String, dynamic> toJson() => {
-    'bytes': base64Encode(bytes),
+    'path': path,
+    'bytes': (path == null && bytes.isNotEmpty) ? base64Encode(bytes) : null,
     'x': x,
     'y': y,
     'scale': scale,
   };
 
   factory ExtraImage.fromJson(Map<String, dynamic> j) => ExtraImage(
-    bytes: base64Decode(j['bytes'] as String),
+    bytes:
+        j['bytes'] != null ? base64Decode(j['bytes'] as String) : Uint8List(0),
+    path: j['path'] as String?,
     x: (j['x'] as num).toDouble(),
     y: (j['y'] as num).toDouble(),
     scale: (j['scale'] as num).toDouble(),
@@ -42,7 +60,7 @@ class ExtraImage {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   SAVED CARD  (inchangé — les écrans utilisent toujours imageBytes)
+//   SAVED CARD  (les écrans utilisent toujours imageBytes)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class SavedCard {
@@ -62,6 +80,10 @@ class SavedCard {
   final Uint8List? backImageBytes;
   final int backColor;
 
+  // ✨ Chemins Supabase Storage (nouveau format). Null = ancienne carte base64.
+  final String? imagePath;
+  final String? backImagePath;
+
   // Position nom + rareté (draggables)
   final double nameX, nameY;
   final double rarityX, rarityY;
@@ -80,6 +102,8 @@ class SavedCard {
     List<ExtraImage>? extraImages,
     this.backImageBytes,
     this.backColor = 0xFF16213E,
+    this.imagePath,
+    this.backImagePath,
     this.nameX = 8,
     this.nameY = 200,
     this.rarityX = 8,
@@ -87,6 +111,34 @@ class SavedCard {
     List<TextZone>? textZones,
   }) : extraImages = extraImages ?? [],
        textZones = textZones ?? [];
+
+  /// Copie avec remplacement des champs fournis (les autres sont conservés).
+  SavedCard copyWith({
+    Uint8List? imageBytes,
+    Uint8List? backImageBytes,
+    String? imagePath,
+    String? backImagePath,
+    List<ExtraImage>? extraImages,
+  }) => SavedCard(
+    id: id,
+    name: name,
+    rarity: rarity,
+    effect: effect,
+    imageBytes: imageBytes ?? this.imageBytes,
+    imageX: imageX,
+    imageY: imageY,
+    imageScale: imageScale,
+    extraImages: extraImages ?? this.extraImages,
+    backImageBytes: backImageBytes ?? this.backImageBytes,
+    backColor: backColor,
+    imagePath: imagePath ?? this.imagePath,
+    backImagePath: backImagePath ?? this.backImagePath,
+    nameX: nameX,
+    nameY: nameY,
+    rarityX: rarityX,
+    rarityY: rarityY,
+    textZones: textZones,
+  );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -163,21 +215,29 @@ class CardStorage {
   static String _extraPath(String dir, String id, int i) =>
       '$dir/${_safe(id)}__extra_$i';
 
-  // ── Format RÉSEAU (Supabase) — INCHANGÉ ─────────────────────────────────────
-  //    Utilisé par CollectionService pour card_data. Ne pas modifier.
+  // ── Format RÉSEAU (Supabase) ─────────────────────────────────────────────
+  //    Utilisé par CollectionService pour card_data.
+  //    ✨ v4 : chemin Storage si dispo (léger), base64 sinon (rétro-compat).
 
   static Map<String, dynamic> toJson(SavedCard c) => {
     'id': c.id,
     'name': c.name,
     'rarity': c.rarity.index,
     'effect': c.effect.index,
-    'imageBytes': c.imageBytes != null ? base64Encode(c.imageBytes!) : null,
+    'imagePath': c.imagePath,
+    'imageBytes':
+        (c.imagePath == null && c.imageBytes != null)
+            ? base64Encode(c.imageBytes!)
+            : null,
     'imageX': c.imageX,
     'imageY': c.imageY,
     'imageScale': c.imageScale,
     'extraImages': c.extraImages.map((e) => e.toJson()).toList(),
+    'backImagePath': c.backImagePath,
     'backImageBytes':
-        c.backImageBytes != null ? base64Encode(c.backImageBytes!) : null,
+        (c.backImagePath == null && c.backImageBytes != null)
+            ? base64Encode(c.backImageBytes!)
+            : null,
     'backColor': c.backColor,
     'nameX': c.nameX,
     'nameY': c.nameY,
@@ -207,6 +267,7 @@ class CardStorage {
         j['imageBytes'] != null
             ? base64Decode(j['imageBytes'] as String)
             : null,
+    imagePath: j['imagePath'] as String?,
     imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
     imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
     imageScale: (j['imageScale'] as num?)?.toDouble() ?? 1.0,
@@ -218,6 +279,7 @@ class CardStorage {
         j['backImageBytes'] != null
             ? base64Decode(j['backImageBytes'] as String)
             : null,
+    backImagePath: j['backImagePath'] as String?,
     backColor: (j['backColor'] as int?) ?? 0xFF16213E,
     nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
     nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
@@ -255,9 +317,11 @@ class CardStorage {
     'rarityY': c.rarityY,
     'hasImage': c.imageBytes != null,
     'hasBack': c.backImageBytes != null,
+    'imagePath': c.imagePath,
+    'backImagePath': c.backImagePath,
     'extraImages':
         c.extraImages
-            .map((e) => {'x': e.x, 'y': e.y, 'scale': e.scale})
+            .map((e) => {'x': e.x, 'y': e.y, 'scale': e.scale, 'path': e.path})
             .toList(),
     'textZones':
         c.textZones
@@ -305,6 +369,7 @@ class CardStorage {
             x: (m['x'] as num).toDouble(),
             y: (m['y'] as num).toDouble(),
             scale: (m['scale'] as num).toDouble(),
+            path: m['path'] as String?,
           ),
         );
       }
@@ -322,6 +387,8 @@ class CardStorage {
       extraImages: extras,
       backImageBytes: back,
       backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      imagePath: j['imagePath'] as String?,
+      backImagePath: j['backImagePath'] as String?,
       nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
       nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
       rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
@@ -440,7 +507,8 @@ class CardStorage {
         list.map((e) => _cardFromMeta(e as Map<String, dynamic>, dir)),
       );
       _cache = cards;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ CardStorage.loadCards : $e');
       _cache = [];
     }
     return List<SavedCard>.from(_cache!);
