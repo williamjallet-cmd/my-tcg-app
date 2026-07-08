@@ -197,6 +197,11 @@ String _catKey(String colId) {
   return 'local_cat_${uid}_$colId';
 }
 
+String _seenKey(String colId) {
+  final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+  return 'seen_${uid}_$colId';
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  PRIMITIVES ARCADE PARTAGÉES
 // ════════════════════════════════════════════════════════════════════════════
@@ -433,6 +438,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   List<SavedCard> _obtainedCards = [];
   Set<String> _catalogueIds = {};
   bool _loading = true;
+  // ✨ Polish : doublons (quantité par carte) + badge NEW (cartes non consultées)
+  Map<String, int> _qtyByCard = {};
+  Set<String> _seenIds = {};
   String _sortBy = 'rarity';
   bool _sortAsc = true;
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
@@ -559,17 +567,30 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     final Set<String> catIds =
         (prefs.getStringList(_catKey(widget.collection.id)) ?? []).toSet();
 
+    // Badge NEW : cartes déjà consultées. Au premier lancement, tout
+    // l'existant est considéré comme déjà vu (pas de déluge de badges).
+    final seenStored = prefs.getStringList(_seenKey(widget.collection.id));
+    final Set<String> seenIds = (seenStored ?? obtIds.toList()).toSet();
+    if (seenStored == null) {
+      await prefs.setStringList(
+        _seenKey(widget.collection.id),
+        seenIds.toList(),
+      );
+    }
+
     // 1) Affichage immédiat depuis le cache local (aucune attente réseau)
     if (mounted) {
       setState(() {
         _allCards = all;
         _obtainedCards = all.where((c) => obtIds.contains(c.id)).toList();
         _catalogueIds = catIds;
+        _seenIds = seenIds;
         _loading = all.isEmpty && catIds.isEmpty;
       });
     }
 
     // 2) Synchronisation Supabase en arrière-plan (ne bloque pas l'affichage)
+    final qty = <String, int>{..._qtyByCard};
     try {
       final remoteEntries = await CollectionService.instance.loadUserCards(
         widget.collection.id,
@@ -577,6 +598,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       final newCards = <SavedCard>[];
       for (final entry in remoteEntries) {
         obtIds.add(entry.cardId);
+        qty[entry.cardId] = entry.quantity;
         final alreadyLocal = all.any((c) => c.id == entry.cardId);
         final alreadyQueued = newCards.any((c) => c.id == entry.cardId);
         if (!alreadyLocal && !alreadyQueued) {
@@ -628,9 +650,21 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         _allCards = all;
         _obtainedCards = all.where((c) => obtIds.contains(c.id)).toList();
         _catalogueIds = catIds;
+        _qtyByCard = qty;
         _loading = false;
       });
     }
+  }
+
+  // ✨ Badge NEW : marque une carte comme consultée
+  Future<void> _markSeen(String cardId) async {
+    if (_seenIds.contains(cardId)) return;
+    setState(() => _seenIds.add(cardId));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _seenKey(widget.collection.id),
+      _seenIds.toList(),
+    );
   }
 
   // FIX 1 : plus de fallback _allCards → isolation stricte par collection
@@ -1042,8 +1076,123 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget _secTitle(String t) => Text(t, style: _arcade(size: 16));
 
   // ── ONGLET CARTES ───────────────────────────────────────────────────────
+  // ✨ Jauge de complétion du dex — globale + détail par rareté
+  Widget _dexHeader() {
+    final cat = _catalogue;
+    if (cat.isEmpty) return const SizedBox.shrink();
+    final obtIds = _obtainedCards.map((c) => c.id).toSet();
+    final total = cat.length;
+    final owned = cat.where((c) => obtIds.contains(c.id)).length;
+    final pct = total == 0 ? 0.0 : owned / total;
+    final complete = owned == total;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: complete ? _gold : _surfaceLine, width: 1.5),
+        boxShadow:
+            complete
+                ? [
+                  BoxShadow(
+                    color: _gold.withValues(alpha: 0.35),
+                    blurRadius: 14,
+                  ),
+                ]
+                : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                complete ? '🏆' : '📖',
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'DEX',
+                style: _pixel(size: 9, color: _creamFaint, letterSpacing: 2),
+              ),
+              const Spacer(),
+              Text(
+                '$owned / $total',
+                style: _arcade(size: 15, color: complete ? _gold : _cream),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${(pct * 100).round()}%',
+                style: _pixel(size: 10, color: complete ? _gold : _teal),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 9,
+              backgroundColor: Colors.black.withValues(alpha: 0.35),
+              valueColor: AlwaysStoppedAnimation(complete ? _gold : _teal),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children:
+                Rarity.values.reversed
+                    .where((r) => cat.any((c) => c.rarity == r))
+                    .map((r) {
+                      final rc = _rarColors[r]!;
+                      final tot = cat.where((c) => c.rarity == r).length;
+                      final own =
+                          cat
+                              .where(
+                                (c) => c.rarity == r && obtIds.contains(c.id),
+                              )
+                              .length;
+                      final full = own == tot;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Column(
+                            children: [
+                              Text(
+                                '$own/$tot',
+                                style: _pixel(
+                                  size: 8,
+                                  color: full ? rc : _creamDim,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(3),
+                                child: LinearProgressIndicator(
+                                  value: tot == 0 ? 0 : own / tot,
+                                  minHeight: 4,
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                  valueColor: AlwaysStoppedAnimation(rc),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    })
+                    .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _cardsTab() => Column(
     children: [
+      _dexHeader(),
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: SingleChildScrollView(
@@ -1162,13 +1311,19 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         childAspectRatio: 0.7,
       ),
       itemCount: cards.length,
-      itemBuilder:
-          (_, i) => RepaintBoundary(
-            child: _CardTile(
-              card: cards[i],
-              revealed: obtIds.contains(cards[i].id),
-            ),
+      itemBuilder: (_, i) {
+        final c = cards[i];
+        final revealed = obtIds.contains(c.id);
+        return RepaintBoundary(
+          child: _CardTile(
+            card: c,
+            revealed: revealed,
+            copies: _qtyByCard[c.id] ?? 1,
+            isNew: revealed && !_seenIds.contains(c.id),
+            onSeen: () => _markSeen(c.id),
           ),
+        );
+      },
     );
   }
 
@@ -1439,11 +1594,18 @@ class _CardTile extends StatelessWidget {
   final bool revealed;
   final bool isAdmin;
   final VoidCallback? onDelete;
+  // ✨ Polish : compteur de doublons + badge NEW
+  final int copies;
+  final bool isNew;
+  final VoidCallback? onSeen;
   const _CardTile({
     required this.card,
     required this.revealed,
     this.isAdmin = false,
     this.onDelete,
+    this.copies = 1,
+    this.isNew = false,
+    this.onSeen,
   });
 
   Color get _rc => _rarColors[card.rarity]!;
@@ -1500,28 +1662,74 @@ class _CardTile extends StatelessWidget {
       );
     }
     return GestureDetector(
-      onTap:
-          () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder:
-                  (_) => CardInspectorScreen(
-                    frontCard: SavedCardFrontWidget(
-                      card: card,
-                      width: 300,
-                      height: 420,
-                    ),
-                    backCard: SavedCardBackWidget(
-                      card: card,
-                      width: 300,
-                      height: 420,
-                    ),
+      onTap: () {
+        onSeen?.call();
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder:
+                (_) => CardInspectorScreen(
+                  frontCard: SavedCardFrontWidget(
+                    card: card,
+                    width: 300,
+                    height: 420,
                   ),
-            ),
+                  backCard: SavedCardBackWidget(
+                    card: card,
+                    width: 300,
+                    height: 420,
+                  ),
+                ),
           ),
+        );
+      },
       child: Stack(
         children: [
           _front(),
+          // ✨ Badge NEW — carte pas encore consultée
+          if (isNew)
+            Positioned(
+              top: 4,
+              left: 4,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(5, 3, 5, 2),
+                decoration: BoxDecoration(
+                  color: _gold,
+                  borderRadius: BorderRadius.circular(5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _gold.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: Text(
+                  'NEW',
+                  style: _pixel(size: 6.5, color: const Color(0xFF2A1C00)),
+                ),
+              ),
+            ),
+          // ✨ Compteur de doublons
+          if (copies > 1 && !isAdmin)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _cream.withValues(alpha: 0.35),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '×$copies',
+                  style: _pixel(size: 7.5, color: _cream),
+                ),
+              ),
+            ),
           // Badge 3D
           Positioned(
             bottom: 4,
