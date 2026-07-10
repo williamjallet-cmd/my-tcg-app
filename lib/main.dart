@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -219,52 +218,6 @@ class _GhostButton extends StatelessWidget {
       ),
     );
   }
-}
-
-// ── Rayons en éventail (statique) ───────────────────────────────────────────
-class _RayBurstPainter extends CustomPainter {
-  final Color color;
-  final double opacity;
-  _RayBurstPainter(this.color, this.opacity);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width / 2, size.height / 2);
-    final radius = size.longestSide * 1.4;
-    final paint = Paint()..color = color.withValues(alpha: opacity);
-    const rays = 30;
-    for (int i = 0; i < rays; i++) {
-      final a0 = i * 2 * math.pi / rays;
-      final a1 = a0 + (math.pi / rays) * 0.55;
-      final path =
-          Path()
-            ..moveTo(c.dx, c.dy)
-            ..lineTo(c.dx + radius * math.cos(a0), c.dy + radius * math.sin(a0))
-            ..lineTo(c.dx + radius * math.cos(a1), c.dy + radius * math.sin(a1))
-            ..close();
-      canvas.drawPath(path, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _RayBurstPainter old) => false;
-}
-
-Widget _rayBurst(Color color, double opacity, {double? height}) {
-  final content = IgnorePointer(
-    child: ShaderMask(
-      blendMode: BlendMode.dstIn,
-      shaderCallback:
-          (r) => const RadialGradient(
-            colors: [Colors.black, Colors.transparent],
-            stops: [0.0, 0.7],
-          ).createShader(r),
-      child: CustomPaint(painter: _RayBurstPainter(color, opacity)),
-    ),
-  );
-  return height == null
-      ? Positioned.fill(child: content)
-      : Positioned(top: 0, left: 0, right: 0, height: height, child: content);
 }
 
 class _ScanlinePainter extends CustomPainter {
@@ -1095,7 +1048,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               ),
                             ),
-                            _rayBurst(_gold, 0.07, height: 360),
                             SafeArea(
                               bottom: false,
                               child: Padding(

@@ -194,11 +194,6 @@ class _FriendsScreenState extends State<FriendsScreen>
                           ],
                         ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    'TON RÉSEAU DE DRESSEURS',
-                    style: _T.pixel(8, color: _T.teal, ls: 1.4),
-                  ),
                 ],
               ),
               const Spacer(),

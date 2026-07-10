@@ -596,6 +596,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         widget.collection.id,
       );
       final newCards = <SavedCard>[];
+      // ✨ FIX : le serveur fait foi. Les cartes possédées = celles réellement
+      // obtenues en pack — fini les cartes « possédées » parce que créées
+      // en tant qu'admin ou héritées d'anciennes versions.
+      obtIds.clear();
+      qty.clear();
       for (final entry in remoteEntries) {
         obtIds.add(entry.cardId);
         qty[entry.cardId] = entry.quantity;
@@ -621,7 +626,20 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       final catalog = await CollectionService.instance.getCollectionCards(
         widget.collection.id,
       );
-      catIds.addAll(catalog.map((e) => e.cardId));
+      // ✨ FIX : le catalogue local reflète EXACTEMENT le serveur.
+      // Les cartes supprimées de la collection sont purgées du téléphone
+      // (stockage local + listes), donc les compteurs redeviennent justes.
+      final serverIds = catalog.map((e) => e.cardId).toSet();
+      final removedIds = catIds.difference(serverIds);
+      for (final id in removedIds) {
+        await CardStorage.deleteCard(id);
+        all.removeWhere((c) => c.id == id);
+        obtIds.remove(id);
+      }
+      catIds
+        ..clear()
+        ..addAll(serverIds);
+      await prefs.setStringList(_obtKey(widget.collection.id), obtIds.toList());
 
       // ✨ NOUVEAU : reconstruit les cartes créées par les AUTRES membres
       // (card_data léger du catalogue + images sur Supabase Storage)
