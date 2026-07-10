@@ -379,6 +379,7 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
                   legMoment: _legMoment,
                   onFlip: () => _flip(_index),
                   onAdvance: _advance,
+                  onInspect: () => _inspect(_cards[_index]),
                 ),
                 _Stage.recap => _Recap(
                   cards: _cards,
@@ -424,14 +425,11 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
               ),
             ),
 
-          // Overlay de suspense avant la dernière carte
+          // Overlay de suspense avant la dernière carte (voile sombre sobre)
           if (_suspense)
             Positioned.fill(
               child: IgnorePointer(
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  child: const Center(child: _SuspensePulse()),
-                ),
+                child: ColoredBox(color: Colors.black.withValues(alpha: 0.55)),
               ),
             ),
 
@@ -449,82 +447,6 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
             ),
         ],
       ),
-    );
-  }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   SUSPENSE AVANT LA DERNIÈRE CARTE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class _SuspensePulse extends StatefulWidget {
-  const _SuspensePulse();
-  @override
-  State<_SuspensePulse> createState() => _SuspensePulseState();
-}
-
-class _SuspensePulseState extends State<_SuspensePulse>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-  @override
-  void initState() {
-    super.initState();
-    _c = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        final t = Curves.easeInOut.transform(_c.value);
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Transform.scale(
-              scale: 1.0 + t * 0.18,
-              child: Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const RadialGradient(
-                    colors: [Color(0x33FFC83D), Color(0x00FFC83D)],
-                  ),
-                  border: Border.all(
-                    color: _Pal.gold.withValues(alpha: 0.4 + t * 0.4),
-                    width: 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _Pal.gold.withValues(alpha: 0.25 + t * 0.35),
-                      blurRadius: 24 + t * 20,
-                      spreadRadius: t * 6,
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Text('?', style: _arcade(size: 52, color: _Pal.gold)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'DERNIÈRE CARTE...',
-              style: _pixel(size: 11, color: _Pal.teal, spacing: 2),
-            ),
-          ],
-        );
-      },
     );
   }
 }
@@ -1531,6 +1453,8 @@ class _RevealCarte extends StatelessWidget {
   final bool legMoment;
   final VoidCallback onFlip;
   final VoidCallback onAdvance;
+  // ✨ Tap sur la carte révélée → inspection 3D
+  final VoidCallback onInspect;
 
   const _RevealCarte({
     required this.cards,
@@ -1539,6 +1463,7 @@ class _RevealCarte extends StatelessWidget {
     required this.legMoment,
     required this.onFlip,
     required this.onAdvance,
+    required this.onInspect,
   });
 
   @override
@@ -1559,7 +1484,7 @@ class _RevealCarte extends StatelessWidget {
             card: card,
             revealed: isRev,
             width: 210,
-            onTap: isRev ? null : onFlip,
+            onTap: isRev ? onInspect : onFlip,
           ),
         ),
         const SizedBox(height: 20),
@@ -1609,6 +1534,14 @@ class _RevealCarte extends StatelessWidget {
                       'Appuie pour révéler ›',
                       style: _arcade(size: 16, color: _Pal.creamDim),
                     ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Opacity(
+          opacity: isRev ? 1.0 : 0.0,
+          child: Text(
+            '👆 TOUCHE LA CARTE POUR L\'INSPECTER EN 3D',
+            style: _pixel(size: 8, color: _Pal.creamDim),
           ),
         ),
       ],

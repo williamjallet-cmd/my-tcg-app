@@ -410,8 +410,12 @@ class _CollectionCardState extends State<_CollectionCard> {
 
     final prefs = await SharedPreferences.getInstance();
     final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    // ✨ FIX : on ne compte que les cartes encore présentes dans le catalogue
+    // (les cartes supprimées de la collection ne gonflent plus le compteur)
+    final catalogueIds = cardIds.toSet();
     final obtained =
         (prefs.getStringList('obtained_${uid}_${widget.collection.id}') ?? [])
+            .where(catalogueIds.contains)
             .length;
 
     if (mounted) {

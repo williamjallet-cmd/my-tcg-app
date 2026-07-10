@@ -93,6 +93,8 @@ class UserCardEntry {
   final int quantity;
   final DateTime obtainedAt;
   final Map<String, dynamic>? cardData;
+  // ✨ Fusion GOLD
+  final bool isGold;
 
   const UserCardEntry({
     required this.id,
@@ -102,6 +104,7 @@ class UserCardEntry {
     required this.quantity,
     required this.obtainedAt,
     this.cardData,
+    this.isGold = false,
   });
 
   factory UserCardEntry.fromMap(Map<String, dynamic> m) => UserCardEntry(
@@ -111,6 +114,7 @@ class UserCardEntry {
     cardRarity: m['card_rarity'] as String,
     quantity: (m['quantity'] as int?) ?? 1,
     obtainedAt: DateTime.parse(m['obtained_at'] as String),
+    isGold: (m['is_gold'] as bool?) ?? false,
     cardData:
         m['card_data'] != null
             ? (m['card_data'] as Map<String, dynamic>)
@@ -541,6 +545,40 @@ class CollectionService {
       }
     } catch (e) {
       debugPrint('⚠️ saveUserCards : $e');
+    }
+  }
+
+  /// ✨ FUSION GOLD : consomme [cost] exemplaires d'une carte possédée
+  /// et la transforme en version GOLD permanente.
+  /// Retourne true si la fusion a réussi.
+  Future<bool> fuseCardToGold(
+    String collectionId,
+    String cardId,
+    int cost,
+  ) async {
+    try {
+      final row =
+          await _db
+              .from('user_collection_cards')
+              .select('id, quantity, is_gold')
+              .eq('collection_id', collectionId)
+              .eq('user_id', _uid)
+              .eq('card_id', cardId)
+              .maybeSingle();
+      if (row == null) return false;
+      if ((row['is_gold'] as bool?) ?? false) return false; // déjà GOLD
+      final qty = (row['quantity'] as int?) ?? 1;
+      if (qty < cost) return false; // pas assez d'exemplaires
+
+      final remaining = qty - cost;
+      await _db
+          .from('user_collection_cards')
+          .update({'quantity': remaining < 1 ? 1 : remaining, 'is_gold': true})
+          .eq('id', row['id'] as String);
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ fuseCardToGold : $e');
+      return false;
     }
   }
 
