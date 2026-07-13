@@ -1,16 +1,17 @@
 // card_storage.dart — SavedCard + ExtraImage (images multiples)
-// ✅ v3 : les images sont stockées en FICHIERS sur le disque
-//    - SharedPreferences ne garde plus que de petites métadonnées → rapide
-//    - plus d'encodage/décodage base64 géant à chaque chargement / écriture
-//    - migration AUTOMATIQUE et NON destructive depuis l'ancien format
-// ✅ v4 (migration Supabase Storage, juillet 2026) :
-//    - SavedCard/ExtraImage portent des CHEMINS Supabase Storage optionnels
-//      (imagePath, backImagePath, ExtraImage.path)
-//    - toJson (format réseau) : si un chemin existe → on envoie LE CHEMIN
-//      et plus le base64 → card_data devient minuscule
-//    - fromJson : accepte les DEUX formats (base64 des anciennes cartes,
-//      chemins des nouvelles) → 100 % rétro-compatible, rien à migrer
-//    - le téléchargement des images se fait via CardMediaService
+// ✅ v3 : images en FICHIERS sur le disque (métadonnées seules en prefs)
+// ✅ v4 : chemins Supabase Storage optionnels (rétro-compat base64)
+// ✅ v5 (bloc 1 — couches unifiées, juillet 2026) :
+//    - SavedCard porte une liste `layers` (CardLayer) : image / texte /
+//      sticker, avec rotation, flip, opacité, ordre d'empilement libre
+//    - les ANCIENS champs (imageBytes, imageX/Y/Scale, extraImages,
+//      textZones, nameX/Y, rarityX/Y) sont CONSERVÉS et mirrorés depuis
+//      les couches → les autres écrans continuent de fonctionner tels quels
+//    - fromJson / _cardFromMeta : si `layers` absent (ancienne carte),
+//      les couches sont reconstruites via LegacyLayerBuilder
+//      → 100 % rétro-compatible, rien à migrer manuellement
+//    - les octets des couches image sont stockés en fichiers nommés par
+//      l'ID DE LA COUCHE (stable même si on réordonne les couches)
 
 import 'dart:async';
 import 'dart:convert';
@@ -18,10 +19,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart'; // compute()
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'card_layer.dart';
 import 'card_model.dart';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   IMAGE SUPPLÉMENTAIRE (couches multiples)
+//   IMAGE SUPPLÉMENTAIRE (ancien format — conservé pour rétro-compat)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class ExtraImage {
@@ -39,8 +41,6 @@ class ExtraImage {
     this.path,
   });
 
-  // Format réseau (Supabase)
-  // → chemin Storage si dispo (léger), sinon base64 (rétro-compat)
   Map<String, dynamic> toJson() => {
     'path': path,
     'bytes': (path == null && bytes.isNotEmpty) ? base64Encode(bytes) : null,
@@ -60,7 +60,9 @@ class ExtraImage {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   SAVED CARD  (les écrans utilisent toujours imageBytes)
+//   SAVED CARD
+//   `layers` est la SOURCE DE VÉRITÉ pour le rendu du recto.
+//   Les champs legacy sont mirrorés pour les écrans pas encore migrés.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class SavedCard {
@@ -69,32 +71,31 @@ class SavedCard {
   final Rarity rarity;
   final CardEffect effect;
 
-  // Image principale
+  // ✨ v5 : couches unifiées (recto)
+  final List<CardLayer> layers;
+
+  // Legacy — mirrorés depuis layers (voir mirrorLegacyFields)
   final Uint8List? imageBytes;
   final double imageX, imageY, imageScale;
-
-  // Images supplémentaires (couches)
   final List<ExtraImage> extraImages;
+  final double nameX, nameY;
+  final double rarityX, rarityY;
+  final List<TextZone> textZones;
 
   // Verso
   final Uint8List? backImageBytes;
   final int backColor;
 
-  // ✨ Chemins Supabase Storage (nouveau format). Null = ancienne carte base64.
+  // Chemins Supabase Storage
   final String? imagePath;
   final String? backImagePath;
-
-  // Position nom + rareté (draggables)
-  final double nameX, nameY;
-  final double rarityX, rarityY;
-
-  final List<TextZone> textZones;
 
   SavedCard({
     required this.id,
     required this.name,
     this.rarity = Rarity.common,
     this.effect = CardEffect.none,
+    List<CardLayer>? layers,
     this.imageBytes,
     this.imageX = 0,
     this.imageY = 0,
@@ -109,8 +110,117 @@ class SavedCard {
     this.rarityX = 8,
     this.rarityY = 222,
     List<TextZone>? textZones,
-  }) : extraImages = extraImages ?? [],
+  }) : layers = layers ?? [],
+       extraImages = extraImages ?? [],
        textZones = textZones ?? [];
+
+  /// Couches effectives : celles enregistrées, sinon reconstruites
+  /// depuis les champs legacy (anciennes cartes jamais rouvertes).
+  List<CardLayer> get effectiveLayers =>
+      layers.isNotEmpty
+          ? layers
+          : LegacyLayerBuilder.build(
+            name: name,
+            imageBytes: imageBytes,
+            imagePath: imagePath,
+            imageX: imageX,
+            imageY: imageY,
+            imageScale: imageScale,
+            extraImages: extraImages,
+            textZones: textZones,
+            nameX: nameX,
+            nameY: nameY,
+            rarityX: rarityX,
+            rarityY: rarityY,
+          );
+
+  /// Fabrique une SavedCard depuis des couches, en remplissant
+  /// automatiquement les champs legacy pour les écrans non migrés.
+  factory SavedCard.fromLayers({
+    required String id,
+    required String name,
+    required List<CardLayer> layers,
+    Rarity rarity = Rarity.common,
+    CardEffect effect = CardEffect.none,
+    Uint8List? backImageBytes,
+    int backColor = 0xFF16213E,
+    String? backImagePath,
+  }) {
+    Uint8List? mainBytes;
+    String? mainPath;
+    double mX = 0, mY = 0, mScale = 1.0;
+    final extras = <ExtraImage>[];
+    final zones = <TextZone>[];
+    double nX = 8, nY = 200, rX = 8, rY = 222;
+    bool mainFound = false;
+
+    for (final l in layers) {
+      switch (l.type) {
+        case LayerType.image:
+          if (!mainFound) {
+            mainFound = true;
+            mainBytes = l.bytes;
+            mainPath = l.storagePath;
+            mX = l.x;
+            mY = l.y;
+            mScale = l.scale;
+          } else {
+            extras.add(
+              ExtraImage(
+                bytes: l.bytes ?? Uint8List(0),
+                path: l.storagePath,
+                x: l.x,
+                y: l.y,
+                scale: l.scale,
+              ),
+            );
+          }
+        case LayerType.text:
+          if (l.role == LayerRole.cardName) {
+            nX = l.x;
+            nY = l.y;
+          } else if (l.role == LayerRole.cardRarity) {
+            rX = l.x;
+            rY = l.y;
+          } else {
+            zones.add(
+              TextZone(
+                text: l.text,
+                x: l.x,
+                y: l.y,
+                fontSize: l.fontSize,
+                color: l.color,
+                fontFamily: l.fontFamily,
+              ),
+            );
+          }
+        case LayerType.sticker:
+          break; // pas d'équivalent legacy
+      }
+    }
+
+    return SavedCard(
+      id: id,
+      name: name,
+      rarity: rarity,
+      effect: effect,
+      layers: layers,
+      imageBytes: mainBytes,
+      imagePath: mainPath,
+      imageX: mX,
+      imageY: mY,
+      imageScale: mScale,
+      extraImages: extras,
+      backImageBytes: backImageBytes,
+      backColor: backColor,
+      backImagePath: backImagePath,
+      nameX: nX,
+      nameY: nY,
+      rarityX: rX,
+      rarityY: rY,
+      textZones: zones,
+    );
+  }
 
   /// Copie avec remplacement des champs fournis (les autres sont conservés).
   SavedCard copyWith({
@@ -119,11 +229,13 @@ class SavedCard {
     String? imagePath,
     String? backImagePath,
     List<ExtraImage>? extraImages,
+    List<CardLayer>? layers,
   }) => SavedCard(
     id: id,
     name: name,
     rarity: rarity,
     effect: effect,
+    layers: layers ?? this.layers,
     imageBytes: imageBytes ?? this.imageBytes,
     imageX: imageX,
     imageY: imageY,
@@ -143,7 +255,6 @@ class SavedCard {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //   DÉCODAGE EN ARRIÈRE-PLAN (uniquement pour la migration unique)
-//   Doit rester une fonction de premier niveau (exigence de compute()).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 List<SavedCard> _decodeOldCardsInBackground(String data) {
@@ -164,22 +275,12 @@ List<SavedCard> _decodeOldCardsInBackground(String data) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class CardStorage {
-  static const _oldKey =
-      'saved_cards'; // ancien format (base64) — gardé en secours
-  static const _metaKey =
-      'saved_cards_v2'; // nouveau format : métadonnées seules
+  static const _oldKey = 'saved_cards'; // ancien format base64 — secours
+  static const _metaKey = 'saved_cards_v2'; // métadonnées seules
 
-  // Cache mémoire (décodage une seule fois par session)
   static List<SavedCard>? _cache;
-
-  // Chemin du dossier des images (mis en cache)
   static String? _imagesDirPath;
-
-  // Migration « single-flight » : ne s'exécute qu'une fois même si
-  // plusieurs écrans appellent loadCards() en même temps.
   static Future<void>? _migrationFuture;
-
-  // Verrou d'écriture — empêche deux écritures simultanées de s'écraser
   static Future<void>? _pendingWrite;
 
   static Future<void> _withLock(Future<void> Function() fn) async {
@@ -196,7 +297,7 @@ class CardStorage {
 
   static void clearCache() => _cache = null;
 
-  // ── Chemins des fichiers images ───────────────────────────────────────────
+  // ── Chemins des fichiers images ──────────────────────────
 
   static Future<String> _imagesDir() async {
     if (_imagesDirPath != null) return _imagesDirPath!;
@@ -215,15 +316,20 @@ class CardStorage {
   static String _extraPath(String dir, String id, int i) =>
       '$dir/${_safe(id)}__extra_$i';
 
-  // ── Format RÉSEAU (Supabase) ─────────────────────────────────────────────
-  //    Utilisé par CollectionService pour card_data.
-  //    ✨ v4 : chemin Storage si dispo (léger), base64 sinon (rétro-compat).
+  // ✨ v5 : fichier nommé par l'ID DE COUCHE → stable au réordonnancement
+  static String _layerPath(String dir, String cardId, String layerId) =>
+      '$dir/${_safe(cardId)}__layer_${_safe(layerId)}';
+
+  // ── Format RÉSEAU (Supabase) ─────────────────────────────
+  //    v5 : `layers` ajouté ; champs legacy toujours émis (mirroir)
+  //    → les anciennes versions de l'app lisent encore les cartes.
 
   static Map<String, dynamic> toJson(SavedCard c) => {
     'id': c.id,
     'name': c.name,
     'rarity': c.rarity.index,
     'effect': c.effect.index,
+    'layers': c.layers.map((l) => l.toJson(includeBytes: true)).toList(),
     'imagePath': c.imagePath,
     'imageBytes':
         (c.imagePath == null && c.imageBytes != null)
@@ -258,34 +364,16 @@ class CardStorage {
             .toList(),
   };
 
-  static SavedCard fromJson(Map<String, dynamic> j) => SavedCard(
-    id: j['id'] as String,
-    name: j['name'] as String,
-    rarity: Rarity.values[j['rarity'] as int],
-    effect: CardEffect.values[j['effect'] as int],
-    imageBytes:
+  static SavedCard fromJson(Map<String, dynamic> j) {
+    final imageBytes =
         j['imageBytes'] != null
             ? base64Decode(j['imageBytes'] as String)
-            : null,
-    imagePath: j['imagePath'] as String?,
-    imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
-    imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
-    imageScale: (j['imageScale'] as num?)?.toDouble() ?? 1.0,
-    extraImages:
+            : null;
+    final extras =
         ((j['extraImages'] as List?) ?? [])
             .map((e) => ExtraImage.fromJson(e as Map<String, dynamic>))
-            .toList(),
-    backImageBytes:
-        j['backImageBytes'] != null
-            ? base64Decode(j['backImageBytes'] as String)
-            : null,
-    backImagePath: j['backImagePath'] as String?,
-    backColor: (j['backColor'] as int?) ?? 0xFF16213E,
-    nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
-    nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
-    rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
-    rarityY: (j['rarityY'] as num?)?.toDouble() ?? 222,
-    textZones:
+            .toList();
+    final zones =
         ((j['textZones'] as List?) ?? [])
             .map(
               (z) => TextZone(
@@ -297,16 +385,64 @@ class CardStorage {
                 fontFamily: z['fontFamily'] as String?,
               ),
             )
-            .toList(),
-  );
+            .toList();
 
-  // ── Format LOCAL : métadonnées seules (pas d'octets) ────────────────────────
+    // v5 si présent, sinon reconstruction depuis le legacy
+    final layersJson = j['layers'] as List?;
+    final layers =
+        layersJson != null && layersJson.isNotEmpty
+            ? layersJson
+                .map((l) => CardLayer.fromJson(l as Map<String, dynamic>))
+                .toList()
+            : LegacyLayerBuilder.build(
+              name: j['name'] as String,
+              imageBytes: imageBytes,
+              imagePath: j['imagePath'] as String?,
+              imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
+              imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
+              imageScale: (j['imageScale'] as num?)?.toDouble() ?? 1.0,
+              extraImages: extras,
+              textZones: zones,
+              nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
+              nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
+              rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
+              rarityY: (j['rarityY'] as num?)?.toDouble() ?? 222,
+            );
+
+    return SavedCard(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      rarity: Rarity.values[j['rarity'] as int],
+      effect: CardEffect.values[j['effect'] as int],
+      layers: layers,
+      imageBytes: imageBytes,
+      imagePath: j['imagePath'] as String?,
+      imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
+      imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
+      imageScale: (j['imageScale'] as num?)?.toDouble() ?? 1.0,
+      extraImages: extras,
+      backImageBytes:
+          j['backImageBytes'] != null
+              ? base64Decode(j['backImageBytes'] as String)
+              : null,
+      backImagePath: j['backImagePath'] as String?,
+      backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
+      nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
+      rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
+      rarityY: (j['rarityY'] as num?)?.toDouble() ?? 222,
+      textZones: zones,
+    );
+  }
+
+  // ── Format LOCAL : métadonnées seules (pas d'octets) ─────
 
   static Map<String, dynamic> _metaToJson(SavedCard c) => {
     'id': c.id,
     'name': c.name,
     'rarity': c.rarity.index,
     'effect': c.effect.index,
+    'layers': c.layers.map((l) => l.toJson(includeBytes: false)).toList(),
     'imageX': c.imageX,
     'imageY': c.imageY,
     'imageScale': c.imageScale,
@@ -338,7 +474,7 @@ class CardStorage {
             .toList(),
   };
 
-  // Reconstruit un SavedCard depuis ses métadonnées + lecture des fichiers images.
+  // Reconstruit un SavedCard depuis ses métadonnées + fichiers images.
   static Future<SavedCard> _cardFromMeta(
     Map<String, dynamic> j,
     String dir,
@@ -375,11 +511,57 @@ class CardStorage {
       }
     }
 
+    final zones =
+        ((j['textZones'] as List?) ?? [])
+            .map(
+              (z) => TextZone(
+                text: z['text'] as String,
+                x: (z['x'] as num).toDouble(),
+                y: (z['y'] as num).toDouble(),
+                fontSize: (z['fontSize'] as num).toDouble(),
+                color: z['color'] as int,
+                fontFamily: z['fontFamily'] as String?,
+              ),
+            )
+            .toList();
+
+    // ✨ v5 : couches — octets lus depuis les fichiers par ID de couche
+    List<CardLayer> layers = [];
+    final layersMeta = (j['layers'] as List?) ?? [];
+    for (final lm in layersMeta) {
+      final layer = CardLayer.fromJson(lm as Map<String, dynamic>);
+      if (layer.type == LayerType.image &&
+          ((lm['hasBytes'] as bool?) ?? false)) {
+        final f = File(_layerPath(dir, id, layer.id));
+        if (await f.exists()) layer.bytes = await f.readAsBytes();
+      }
+      layers.add(layer);
+    }
+
+    // Ancienne carte (pas de couches en meta) → reconstruction
+    if (layers.isEmpty) {
+      layers = LegacyLayerBuilder.build(
+        name: j['name'] as String,
+        imageBytes: main,
+        imagePath: j['imagePath'] as String?,
+        imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
+        imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
+        imageScale: (j['imageScale'] as num?)?.toDouble() ?? 1.0,
+        extraImages: extras,
+        textZones: zones,
+        nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
+        nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
+        rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
+        rarityY: (j['rarityY'] as num?)?.toDouble() ?? 222,
+      );
+    }
+
     return SavedCard(
       id: id,
       name: j['name'] as String,
       rarity: Rarity.values[j['rarity'] as int],
       effect: CardEffect.values[j['effect'] as int],
+      layers: layers,
       imageBytes: main,
       imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
       imageY: (j['imageY'] as num?)?.toDouble() ?? 0,
@@ -393,23 +575,11 @@ class CardStorage {
       nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
       rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
       rarityY: (j['rarityY'] as num?)?.toDouble() ?? 222,
-      textZones:
-          ((j['textZones'] as List?) ?? [])
-              .map(
-                (z) => TextZone(
-                  text: z['text'] as String,
-                  x: (z['x'] as num).toDouble(),
-                  y: (z['y'] as num).toDouble(),
-                  fontSize: (z['fontSize'] as num).toDouble(),
-                  color: z['color'] as int,
-                  fontFamily: z['fontFamily'] as String?,
-                ),
-              )
-              .toList(),
+      textZones: zones,
     );
   }
 
-  // Écrit les fichiers images d'une carte (et nettoie les anciens devenus inutiles).
+  // Écrit les fichiers images d'une carte (et nettoie les anciens).
   static Future<void> _writeImages(SavedCard c, String dir) async {
     final mainF = File(_mainPath(dir, c.id));
     if (c.imageBytes != null) {
@@ -430,11 +600,29 @@ class CardStorage {
         _extraPath(dir, c.id, i),
       ).writeAsBytes(c.extraImages[i].bytes, flush: true);
     }
-    // Supprime d'éventuels extras restants d'une version précédente de la carte
     int i = c.extraImages.length;
     while (await File(_extraPath(dir, c.id, i)).exists()) {
       await File(_extraPath(dir, c.id, i)).delete();
       i++;
+    }
+
+    // ✨ v5 : fichiers des couches image — on réécrit celles présentes,
+    // puis on supprime tout fichier __layer_* orphelin de cette carte.
+    final keep = <String>{};
+    for (final l in c.layers) {
+      if (l.type == LayerType.image && l.bytes != null) {
+        final path = _layerPath(dir, c.id, l.id);
+        keep.add(path);
+        await File(path).writeAsBytes(l.bytes!, flush: true);
+      }
+    }
+    final prefix = '${_safe(c.id)}__layer_';
+    await for (final entity in Directory(dir).list()) {
+      if (entity is File &&
+          entity.uri.pathSegments.last.startsWith(prefix) &&
+          !keep.contains(entity.path)) {
+        await entity.delete();
+      }
     }
   }
 
@@ -448,25 +636,30 @@ class CardStorage {
       await File(_extraPath(dir, id, i)).delete();
       i++;
     }
+    // ✨ v5 : fichiers de couches
+    final prefix = '${_safe(id)}__layer_';
+    await for (final entity in Directory(dir).list()) {
+      if (entity is File && entity.uri.pathSegments.last.startsWith(prefix)) {
+        await entity.delete();
+      }
+    }
   }
 
-  // ── Migration automatique, non destructive ──────────────────────────────────
+  // ── Migration automatique, non destructive ───────────────
 
   static Future<void> _ensureMigrated(SharedPreferences prefs) {
     return _migrationFuture ??= _migrate(prefs);
   }
 
   static Future<void> _migrate(SharedPreferences prefs) async {
-    // Déjà migré ?
     if (prefs.getString(_metaKey) != null) return;
 
     final old = prefs.getString(_oldKey);
     if (old == null || old.isEmpty) {
-      await prefs.setString(_metaKey, '[]'); // rien à migrer, on initialise
+      await prefs.setString(_metaKey, '[]');
       return;
     }
 
-    // Décode l'ancien format base64 en arrière-plan (une seule fois)
     List<SavedCard> cards;
     try {
       cards = await compute(_decodeOldCardsInBackground, old);
@@ -485,7 +678,7 @@ class CardStorage {
     // NB : on NE supprime PAS l'ancienne clé 'saved_cards' → filet de sécurité.
   }
 
-  // ── Lecture ───────────────────────────────────────────────────────────────
+  // ── Lecture ──────────────────────────────────────────────
 
   static Future<List<SavedCard>> loadCards() async {
     if (_cache != null) return List<SavedCard>.from(_cache!);
@@ -502,7 +695,6 @@ class CardStorage {
 
     try {
       final list = jsonDecode(data) as List;
-      // Lecture des fichiers en parallèle (I/O rapide, ne gèle pas l'écran)
       final cards = await Future.wait(
         list.map((e) => _cardFromMeta(e as Map<String, dynamic>, dir)),
       );
@@ -514,7 +706,7 @@ class CardStorage {
     return List<SavedCard>.from(_cache!);
   }
 
-  // ── Écriture ──────────────────────────────────────────────────────────────
+  // ── Écriture ─────────────────────────────────────────────
 
   static Future<void> saveCards(List<SavedCard> cards) async {
     await _withLock(() async {
@@ -539,7 +731,7 @@ class CardStorage {
   static Future<void> addCard(SavedCard card) async {
     await _withLock(() async {
       final cards = await loadCards();
-      cards.removeWhere((c) => c.id == card.id); // évite les doublons
+      cards.removeWhere((c) => c.id == card.id);
       cards.add(card);
       final prefs = await SharedPreferences.getInstance();
       final dir = await _imagesDir();
@@ -552,14 +744,13 @@ class CardStorage {
     });
   }
 
-  // Ajout groupé : une seule écriture des métadonnées
   static Future<void> addCards(List<SavedCard> newCards) async {
     if (newCards.isEmpty) return;
     await _withLock(() async {
       final cards = await loadCards();
       final dir = await _imagesDir();
       for (final card in newCards) {
-        cards.removeWhere((c) => c.id == card.id); // évite les doublons
+        cards.removeWhere((c) => c.id == card.id);
         cards.add(card);
         await _writeImages(card, dir);
       }
