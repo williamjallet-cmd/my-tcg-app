@@ -1,4 +1,22 @@
-// card_creator_screen.dart — BLOC 1 : modèle de couches unifié
+// card_creator_screen.dart — BLOCS 1 + 2 + 3
+//
+// ✨ Bloc 3 :
+//   • Gras / italique sur les textes
+//   • Contour (couleur + épaisseur) via double Text superposé
+//     (un Paint en mode stroke dessous, le remplissage dessus)
+//   • Ombre paramétrable (décalage X/Y, flou, couleur)
+//   • Le NOM de la carte est stylable aussi (crayon dans la pilule,
+//     dialog sans champ texte ni bouton supprimer)
+//   • La puce sombre derrière les zones de texte disparaît dès qu'un
+//     contour ou une ombre est appliqué (rendu propre) — les anciennes
+//     cartes, sans style, gardent leur apparence exacte
+//
+// ✨ Bloc 2 :
+//   • Bouton « Couches » dans la barre du haut → panneau glissant
+//   • Liste affichée du premier plan (haut) vers l'arrière-plan (bas)
+//   • Glisser la poignée pour réordonner, œil pour masquer/afficher,
+//     taper une ligne pour sélectionner la couche sur la carte
+//   • Cadenas sur le nom et la rareté (réordonnables mais indestructibles)
 //
 // ✨ Nouveautés :
 //   • Tout élément (image, texte, nom, rareté) est une CardLayer
@@ -233,6 +251,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   // ────────────────────────────────────────────────────────
 
   void _editTextLayer(CardLayer layer) {
+    final isName = layer.role == LayerRole.cardName;
     final controller = TextEditingController(text: layer.text);
     String selectedFont =
         layer.fontFamily == null
@@ -248,26 +267,27 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             builder:
                 (context, setDialogState) => AlertDialog(
                   backgroundColor: const Color(0xFF16213E),
-                  title: const Text(
-                    'Modifier le texte',
-                    style: TextStyle(color: Colors.white),
+                  title: Text(
+                    isName ? 'Style du nom' : 'Modifier le texte',
+                    style: const TextStyle(color: Colors.white),
                   ),
                   content: SingleChildScrollView(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextField(
-                          controller: controller,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: const InputDecoration(
-                            labelText: 'Texte',
-                            labelStyle: TextStyle(color: Colors.white54),
-                            enabledBorder: UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white38),
+                        if (!isName)
+                          TextField(
+                            controller: controller,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: const InputDecoration(
+                              labelText: 'Texte',
+                              labelStyle: TextStyle(color: Colors.white54),
+                              enabledBorder: UnderlineInputBorder(
+                                borderSide: BorderSide(color: Colors.white38),
+                              ),
                             ),
                           ),
-                        ),
                         const SizedBox(height: 16),
                         const Text(
                           'Police',
@@ -367,7 +387,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                           style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         Slider(
-                          value: layer.fontSize.clamp(10, 40),
+                          value: layer.fontSize.clamp(10.0, 40.0),
                           min: 10,
                           max: 40,
                           activeColor: const Color(0xFF6C4AB6),
@@ -376,27 +396,340 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                             setState(() {});
                           },
                         ),
+                        const SizedBox(height: 12),
+                        // ✨ Bloc 3 : gras / italique
+                        Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                setDialogState(() => layer.bold = !layer.bold);
+                                setState(() {});
+                              },
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color:
+                                      layer.bold
+                                          ? const Color(0xFF6C4AB6)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                    color: const Color(0xFF6C4AB6),
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'G',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () {
+                                setDialogState(
+                                  () => layer.italic = !layer.italic,
+                                );
+                                setState(() {});
+                              },
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color:
+                                      layer.italic
+                                          ? const Color(0xFF6C4AB6)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                    color: const Color(0xFF6C4AB6),
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'I',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontStyle: FontStyle.italic,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // ✨ Bloc 3 : contour
+                        const Text(
+                          'Contour',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                setDialogState(() => layer.outlineColor = null);
+                                setState(() {});
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      layer.outlineColor == null
+                                          ? const Color(0xFF6C4AB6)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                    color: const Color(0xFF6C4AB6),
+                                  ),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  'Aucun',
+                                  style: TextStyle(
+                                    color:
+                                        layer.outlineColor == null
+                                            ? Colors.white
+                                            : const Color(0xFF6C4AB6),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            ...[
+                              0xFF000000,
+                              0xFFFFFFFF,
+                              0xFFFFD700,
+                              0xFFE53935,
+                              0xFF1E88E5,
+                              0xFF8E24AA,
+                            ].map(
+                              (c) => GestureDetector(
+                                onTap: () {
+                                  setDialogState(() => layer.outlineColor = c);
+                                  setState(() {});
+                                },
+                                child: Container(
+                                  width: 30,
+                                  height: 30,
+                                  decoration: BoxDecoration(
+                                    color: Color(c),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color:
+                                          layer.outlineColor == c
+                                              ? Colors.white
+                                              : Colors.white24,
+                                      width: layer.outlineColor == c ? 3 : 1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (layer.outlineColor != null)
+                          Row(
+                            children: [
+                              const Text(
+                                'Épaisseur',
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  value: layer.outlineWidth.clamp(1.0, 6.0),
+                                  min: 1,
+                                  max: 6,
+                                  activeColor: const Color(0xFF6C4AB6),
+                                  onChanged: (v) {
+                                    setDialogState(
+                                      () => layer.outlineWidth = v,
+                                    );
+                                    setState(() {});
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        const SizedBox(height: 8),
+                        // ✨ Bloc 3 : ombre
+                        Row(
+                          children: [
+                            const Text(
+                              'Ombre',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const Spacer(),
+                            Switch(
+                              value: layer.shadowOn,
+                              activeColor: const Color(0xFF6C4AB6),
+                              onChanged: (v) {
+                                setDialogState(() => layer.shadowOn = v);
+                                setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                        if (layer.shadowOn) ...[
+                          Row(
+                            children: [
+                              const SizedBox(
+                                width: 74,
+                                child: Text(
+                                  'Décalage X',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  value: layer.shadowDx.clamp(-8.0, 8.0),
+                                  min: -8,
+                                  max: 8,
+                                  activeColor: const Color(0xFF6C4AB6),
+                                  onChanged: (v) {
+                                    setDialogState(() => layer.shadowDx = v);
+                                    setState(() {});
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              const SizedBox(
+                                width: 74,
+                                child: Text(
+                                  'Décalage Y',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  value: layer.shadowDy.clamp(-8.0, 8.0),
+                                  min: -8,
+                                  max: 8,
+                                  activeColor: const Color(0xFF6C4AB6),
+                                  onChanged: (v) {
+                                    setDialogState(() => layer.shadowDy = v);
+                                    setState(() {});
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              const SizedBox(
+                                width: 74,
+                                child: Text(
+                                  'Flou',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  value: layer.shadowBlur.clamp(0.0, 12.0),
+                                  min: 0,
+                                  max: 12,
+                                  activeColor: const Color(0xFF6C4AB6),
+                                  onChanged: (v) {
+                                    setDialogState(() => layer.shadowBlur = v);
+                                    setState(() {});
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children:
+                                [
+                                      0xFF000000,
+                                      0xFFFFFFFF,
+                                      0xFFFFD700,
+                                      0xFFE53935,
+                                      0xFF1E88E5,
+                                    ]
+                                    .map(
+                                      (c) => GestureDetector(
+                                        onTap: () {
+                                          setDialogState(
+                                            () => layer.shadowColor = c,
+                                          );
+                                          setState(() {});
+                                        },
+                                        child: Container(
+                                          width: 30,
+                                          height: 30,
+                                          decoration: BoxDecoration(
+                                            color: Color(c),
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color:
+                                                  layer.shadowColor == c
+                                                      ? Colors.white
+                                                      : Colors.white24,
+                                              width:
+                                                  layer.shadowColor == c
+                                                      ? 3
+                                                      : 1,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                   actions: [
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _layers.remove(layer);
-                          _selected = -1;
-                        });
-                        Navigator.pop(context);
-                      },
-                      child: const Text(
-                        'Supprimer',
-                        style: TextStyle(color: Colors.red),
+                    if (!isName)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _layers.remove(layer);
+                            _selected = -1;
+                          });
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          'Supprimer',
+                          style: TextStyle(color: Colors.red),
+                        ),
                       ),
-                    ),
                     TextButton(
                       onPressed: () {
                         setState(() {
-                          layer.text = controller.text;
+                          if (!isName) layer.text = controller.text;
                           layer.color = selectedColor.toARGB32();
                           layer.fontFamily =
                               selectedFont == 'Default'
@@ -600,6 +933,52 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   //   RENDU D'UNE COUCHE
   // ────────────────────────────────────────────────────────
 
+  // ✨ Bloc 3 : rendu de texte stylé (gras, italique, contour, ombre)
+  // Contour = deux Text superposés : le stroke dessous, le remplissage
+  // dessus. L'ombre est portée par la couche du dessous pour suivre la
+  // silhouette du contour.
+  Widget _styledText(String text, CardLayer l) {
+    final base = TextStyle(
+      fontSize: l.fontSize,
+      fontFamily: l.fontFamily,
+      fontWeight: l.bold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: l.italic ? FontStyle.italic : FontStyle.normal,
+    );
+    final shadows =
+        l.shadowOn
+            ? [
+              Shadow(
+                color: Color(l.shadowColor),
+                offset: Offset(l.shadowDx, l.shadowDy),
+                blurRadius: l.shadowBlur,
+              ),
+            ]
+            : null;
+
+    if (l.outlineColor == null) {
+      return Text(
+        text,
+        style: base.copyWith(color: Color(l.color), shadows: shadows),
+      );
+    }
+    return Stack(
+      children: [
+        Text(
+          text,
+          style: base.copyWith(
+            shadows: shadows,
+            foreground:
+                Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = l.outlineWidth
+                  ..color = Color(l.outlineColor!),
+          ),
+        ),
+        Text(text, style: base.copyWith(color: Color(l.color))),
+      ],
+    );
+  }
+
   Widget _layerContent(CardLayer l, {required bool selected}) {
     Widget content;
     switch (l.type) {
@@ -610,15 +989,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 : const SizedBox(width: 60, height: 60);
       case LayerType.text:
         if (l.role == LayerRole.cardName) {
-          content = Text(
-            _nameController.text,
-            style: TextStyle(
-              color: Color(l.color),
-              fontSize: l.fontSize,
-              fontWeight: FontWeight.bold,
-              shadows: const [Shadow(color: Colors.black, blurRadius: 4)],
-            ),
-          );
+          content = _styledText(_nameController.text, l);
         } else if (l.role == LayerRole.cardRarity) {
           content = Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -632,20 +1003,16 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             ),
           );
         } else {
+          // La puce sombre disparaît dès qu'un style est appliqué :
+          // les anciennes cartes (sans style) gardent leur rendu exact
+          final hasStyle = l.outlineColor != null || l.shadowOn;
           content = Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.black45,
+              color: hasStyle ? Colors.transparent : Colors.black45,
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Text(
-              l.text,
-              style: TextStyle(
-                color: Color(l.color),
-                fontSize: l.fontSize,
-                fontFamily: l.fontFamily,
-              ),
-            ),
+            child: _styledText(l.text, l),
           );
         }
       case LayerType.sticker:
@@ -680,7 +1047,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           // Second tap sur un texte déjà sélectionné → édition rapide
           if (selected &&
               l.type == LayerType.text &&
-              l.role == LayerRole.normal) {
+              l.role != LayerRole.cardRarity) {
             _editTextLayer(l);
           }
         },
@@ -901,7 +1268,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
               ),
               _pillButton(Icons.flip_to_front, () => _moveLayer(1)),
               _pillButton(Icons.flip_to_back, () => _moveLayer(-1)),
-              if (l.type == LayerType.text && l.role == LayerRole.normal)
+              if (l.type == LayerType.text && l.role != LayerRole.cardRarity)
                 _pillButton(Icons.edit, () => _editTextLayer(l)),
               if (l.isDeletable) _pillButton(Icons.copy, _duplicateSelected),
               if (l.isDeletable)
@@ -1004,6 +1371,239 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
+  // ────────────────────────────────────────────────────────
+  //   PANNEAU COUCHES (bloc 2)
+  //   Affiché du PREMIER PLAN (haut) vers l'ARRIÈRE-PLAN (bas),
+  //   comme dans les logiciels de dessin.
+  //   Mapping : index panneau p ↔ index couche i = length - 1 - p
+  // ────────────────────────────────────────────────────────
+
+  String _layerLabel(CardLayer l) {
+    switch (l.type) {
+      case LayerType.image:
+        final images = _layers.where((e) => e.type == LayerType.image).toList();
+        return 'Image ${images.indexOf(l) + 1}';
+      case LayerType.text:
+        if (l.role == LayerRole.cardName) {
+          return 'Nom « ${_nameController.text} »';
+        }
+        if (l.role == LayerRole.cardRarity) return 'Rareté ($_rarityLabel)';
+        return l.text.isEmpty ? 'Texte' : l.text;
+      case LayerType.sticker:
+        return 'Sticker';
+    }
+  }
+
+  Widget _layerThumb(CardLayer l) {
+    if (l.type == LayerType.image && l.bytes != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Image.memory(
+          l.bytes!,
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          cacheWidth: 64,
+        ),
+      );
+    }
+    IconData icon;
+    switch (l.type) {
+      case LayerType.image:
+        icon = Icons.image;
+      case LayerType.text:
+        icon = l.role == LayerRole.cardRarity ? Icons.star : Icons.text_fields;
+      case LayerType.sticker:
+        icon = Icons.emoji_emotions;
+    }
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Icon(icon, size: 18, color: Colors.white70),
+    );
+  }
+
+  void _openLayersPanel() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF16213E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (sheetContext) => StatefulBuilder(
+            builder: (sheetContext, setSheet) {
+              // Rafraîchit le sheet ET l'écran derrière
+              void refresh(VoidCallback fn) {
+                setSheet(fn);
+                setState(() {});
+              }
+
+              return SafeArea(
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(sheetContext).size.height * 0.6,
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.layers,
+                            size: 18,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Couches',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          const Text(
+                            'haut = devant',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: ReorderableListView.builder(
+                          shrinkWrap: true,
+                          buildDefaultDragHandles: false,
+                          itemCount: _layers.length,
+                          onReorder: (oldP, newP) {
+                            if (newP > oldP) newP--;
+                            refresh(() {
+                              final sel = _sel; // suit la couche, pas l'index
+                              final li = _layers.length - 1 - oldP;
+                              final ln = _layers.length - 1 - newP;
+                              final l = _layers.removeAt(li);
+                              _layers.insert(ln, l);
+                              if (sel != null) {
+                                _selected = _layers.indexOf(sel);
+                              }
+                            });
+                          },
+                          itemBuilder: (context, p) {
+                            final i = _layers.length - 1 - p;
+                            final l = _layers[i];
+                            final selected = i == _selected;
+                            return Container(
+                              key: ValueKey(l.id),
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A1A2E),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color:
+                                      selected
+                                          ? const Color(0xFFFAC775)
+                                          : Colors.white12,
+                                  width: selected ? 1.5 : 1,
+                                ),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => refresh(() => _selected = i),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      ReorderableDragStartListener(
+                                        index: p,
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(6),
+                                          child: Icon(
+                                            Icons.drag_indicator,
+                                            size: 20,
+                                            color: Colors.white38,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Opacity(
+                                        opacity: l.visible ? 1 : 0.4,
+                                        child: _layerThumb(l),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          _layerLabel(l),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color:
+                                                l.visible
+                                                    ? Colors.white
+                                                    : Colors.white38,
+                                            fontSize: 13,
+                                            fontWeight:
+                                                selected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                          ),
+                                        ),
+                                      ),
+                                      if (!l.isDeletable)
+                                        const Padding(
+                                          padding: EdgeInsets.only(right: 4),
+                                          child: Icon(
+                                            Icons.lock,
+                                            size: 14,
+                                            color: Colors.white30,
+                                          ),
+                                        ),
+                                      IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed:
+                                            () => refresh(
+                                              () => l.visible = !l.visible,
+                                            ),
+                                        icon: Icon(
+                                          l.visible
+                                              ? Icons.visibility
+                                              : Icons.visibility_off,
+                                          size: 20,
+                                          color:
+                                              l.visible
+                                                  ? Colors.white70
+                                                  : Colors.white30,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+    );
+  }
+
   Widget _buildSectionLabel(String label) => Align(
     alignment: Alignment.centerLeft,
     child: Text(
@@ -1059,6 +1659,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           style: TextStyle(color: Colors.white),
         ),
         actions: [
+          IconButton(
+            onPressed: _showBack ? null : _openLayersPanel,
+            icon: const Icon(Icons.layers, color: Colors.white70),
+            tooltip: 'Couches',
+          ),
           TextButton.icon(
             onPressed: () {
               setState(() => _selected = -1); // pas de cadre dans l'aperçu
