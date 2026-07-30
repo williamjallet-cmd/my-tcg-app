@@ -86,6 +86,10 @@ class SavedCard {
   final Uint8List? backImageBytes;
   final int backColor;
 
+  // ✨ Bloc 4 : fond du recto (couleur) + cadre décoratif (0 = aucun)
+  final int frontColor;
+  final int frameStyle;
+
   // Chemins Supabase Storage
   final String? imagePath;
   final String? backImagePath;
@@ -103,6 +107,8 @@ class SavedCard {
     List<ExtraImage>? extraImages,
     this.backImageBytes,
     this.backColor = 0xFF16213E,
+    this.frontColor = 0xFF1A1A2E,
+    this.frameStyle = 0,
     this.imagePath,
     this.backImagePath,
     this.nameX = 8,
@@ -144,6 +150,8 @@ class SavedCard {
     CardEffect effect = CardEffect.none,
     Uint8List? backImageBytes,
     int backColor = 0xFF16213E,
+    int frontColor = 0xFF1A1A2E,
+    int frameStyle = 0,
     String? backImagePath,
   }) {
     Uint8List? mainBytes;
@@ -155,6 +163,8 @@ class SavedCard {
     bool mainFound = false;
 
     for (final l in layers) {
+      // Le fond n'a pas d'équivalent legacy → exclu du miroir
+      if (l.role == LayerRole.background) continue;
       switch (l.type) {
         case LayerType.image:
           if (!mainFound) {
@@ -213,6 +223,8 @@ class SavedCard {
       extraImages: extras,
       backImageBytes: backImageBytes,
       backColor: backColor,
+      frontColor: frontColor,
+      frameStyle: frameStyle,
       backImagePath: backImagePath,
       nameX: nX,
       nameY: nY,
@@ -243,6 +255,8 @@ class SavedCard {
     extraImages: extraImages ?? this.extraImages,
     backImageBytes: backImageBytes ?? this.backImageBytes,
     backColor: backColor,
+    frontColor: frontColor,
+    frameStyle: frameStyle,
     imagePath: imagePath ?? this.imagePath,
     backImagePath: backImagePath ?? this.backImagePath,
     nameX: nameX,
@@ -345,6 +359,8 @@ class CardStorage {
             ? base64Encode(c.backImageBytes!)
             : null,
     'backColor': c.backColor,
+    'frontColor': c.frontColor,
+    'frameStyle': c.frameStyle,
     'nameX': c.nameX,
     'nameY': c.nameY,
     'rarityX': c.rarityX,
@@ -427,6 +443,8 @@ class CardStorage {
               : null,
       backImagePath: j['backImagePath'] as String?,
       backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      frontColor: (j['frontColor'] as int?) ?? 0xFF1A1A2E,
+      frameStyle: (j['frameStyle'] as int?) ?? 0,
       nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
       nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
       rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
@@ -447,6 +465,8 @@ class CardStorage {
     'imageY': c.imageY,
     'imageScale': c.imageScale,
     'backColor': c.backColor,
+    'frontColor': c.frontColor,
+    'frameStyle': c.frameStyle,
     'nameX': c.nameX,
     'nameY': c.nameY,
     'rarityX': c.rarityX,
@@ -569,6 +589,8 @@ class CardStorage {
       extraImages: extras,
       backImageBytes: back,
       backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      frontColor: (j['frontColor'] as int?) ?? 0xFF1A1A2E,
+      frameStyle: (j['frameStyle'] as int?) ?? 0,
       imagePath: j['imagePath'] as String?,
       backImagePath: j['backImagePath'] as String?,
       nameX: (j['nameX'] as num?)?.toDouble() ?? 8,

@@ -1,5 +1,10 @@
 // profile_service.dart — fix updateProfile + avatar
+// ✨ @pseudo UNIQUE : le nom affiché reste libre (deux « Will » possibles),
+//    mais le @pseudo identifie sans ambiguïté chaque joueur dans les amis.
+//    L'unicité réelle est garantie par une contrainte UNIQUE en base ;
+//    la vérification côté app sert juste à afficher un message clair.
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class UserProfile {
@@ -60,6 +65,74 @@ class ProfileService {
     }
   }
 
+  // ── @pseudo : normalisation, validation, disponibilité ────────────────────
+
+  /// Forme canonique d'un @pseudo : minuscules, sans @, espaces → _
+  static String normalizeUsername(String raw) =>
+      raw.trim().toLowerCase().replaceAll(RegExp(r'^@+'), '').replaceAll(
+        RegExp(r'\s+'),
+        '_',
+      );
+
+  /// Message d'erreur si le format est invalide, sinon null.
+  /// 3-20 caractères, lettres/chiffres/_ uniquement.
+  static String? validateUsername(String raw) {
+    final u = normalizeUsername(raw);
+    if (u.isEmpty) return 'Choisis un pseudo.';
+    if (u.length < 3) return 'Trop court (3 caractères minimum).';
+    if (u.length > 20) return 'Trop long (20 caractères maximum).';
+    if (!RegExp(r'^[a-z0-9_]+$').hasMatch(u)) {
+      return 'Lettres, chiffres et _ uniquement.';
+    }
+    return null;
+  }
+
+  /// True si le @pseudo est libre (ou déjà le mien).
+  Future<bool> isUsernameAvailable(String raw) async {
+    final u = normalizeUsername(raw);
+    if (u.isEmpty) return false;
+    try {
+      final res =
+          await _db
+              .from('profiles')
+              .select('id')
+              .eq('username', u)
+              .maybeSingle();
+      return res == null || res['id'] == _myId;
+    } catch (e) {
+      debugPrint('⚠️ isUsernameAvailable : $e');
+      return false; // en cas de doute, on ne laisse pas passer
+    }
+  }
+
+  /// Change mon @pseudo. Lève une Exception avec un message lisible si le
+  /// format est invalide ou si le pseudo est déjà pris (y compris en cas de
+  /// collision détectée par la contrainte UNIQUE côté base).
+  Future<UserProfile?> updateUsername(String raw) async {
+    final err = validateUsername(raw);
+    if (err != null) throw Exception(err);
+    final u = normalizeUsername(raw);
+    if (!await isUsernameAvailable(u)) {
+      throw Exception('Le pseudo « @$u » est déjà pris.');
+    }
+    try {
+      final res =
+          await _db
+              .from('profiles')
+              .update({'username': u})
+              .eq('id', _myId)
+              .select()
+              .single();
+      return UserProfile.fromMap(res);
+    } on PostgrestException catch (e) {
+      // 23505 = violation de contrainte UNIQUE (course entre deux joueurs)
+      if (e.code == '23505') {
+        throw Exception('Le pseudo « @$u » vient d\'être pris.');
+      }
+      throw Exception('Impossible de changer le pseudo : ${e.message}');
+    }
+  }
+
   Future<UserProfile?> updateProfile({
     String? displayName,
     String? avatarUrl,
@@ -98,7 +171,9 @@ class ProfileService {
 
   Future<List<UserProfile>> searchUsers(String query) async {
     if (query.trim().isEmpty) return [];
-    final q = query.trim().toLowerCase();
+    // Le « @ » tapé par l'utilisateur ne fait pas partie du pseudo stocké.
+    final q = query.trim().toLowerCase().replaceAll(RegExp(r'^@+'), '');
+    if (q.isEmpty) return [];
     final res = await _db
         .from('profiles')
         .select()

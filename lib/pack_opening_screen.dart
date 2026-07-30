@@ -1475,6 +1475,20 @@ class _RevealCarte extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // ✨ Bandeau de rareté au-dessus de la carte (couleur = rareté).
+        // Hauteur fixe : la carte ne bouge pas quand le badge apparaît.
+        SizedBox(
+          height: 44,
+          child: Center(
+            child: AnimatedOpacity(
+              opacity: isRev ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeOut,
+              child: _RarityBanner(rarity: card.rarity),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         AnimatedScale(
           scale: isRev && legMoment ? 1.12 : 1.0,
           duration: Duration(milliseconds: legMoment ? 1100 : 300),
@@ -1545,6 +1559,36 @@ class _RevealCarte extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// Bandeau de rareté affiché au-dessus de la carte révélée
+class _RarityBanner extends StatelessWidget {
+  final Rarity rarity;
+  const _RarityBanner({required this.rarity});
+
+  @override
+  Widget build(BuildContext context) {
+    final rc = _rarityColor(rarity);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 9),
+      decoration: BoxDecoration(
+        color: rc.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: rc, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: rc.withValues(alpha: 0.45),
+            blurRadius: 20,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Text(
+        _rarityName(rarity).toUpperCase(),
+        style: _pixel(size: 11, color: rc, spacing: 2, weight: FontWeight.w700),
+      ),
     );
   }
 }

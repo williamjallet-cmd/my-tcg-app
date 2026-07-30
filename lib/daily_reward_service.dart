@@ -1,12 +1,12 @@
 // daily_reward_service.dart
 // ════════════════════════════════════════════════════════════════════════════
-//  RÉCOMPENSE QUOTIDIENNE « À RÉCLAMER »
-//    • 1 carte gratuite par jour
-//    • 7 jours d'affilée  →  un BOOSTER (3 cartes) au lieu d'une seule
+//  RÉCOMPENSE QUOTIDIENNE « À RÉCLAMER » — un tirage par jour ET par collection
+//    • 1 carte gratuite par jour, par collection
+//    • 7 jours d'affilée (dans CETTE collection) → un BOOSTER (3 cartes)
 //
 //  L'état (jour de dernière réclamation + série) est stocké en LOCAL par
-//  utilisateur, exactement comme StreakService — instantané, pas de réseau.
-//  Les cartes obtenues, elles, passent par PackOpeningScreen →
+//  utilisateur ET par collection, exactement comme StreakService — instantané,
+//  pas de réseau. Les cartes obtenues, elles, passent par PackOpeningScreen →
 //  CollectionService.saveUserCards : la synchro Supabase reste INCHANGÉE.
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -57,9 +57,9 @@ class DailyRewardService {
   static const int boosterCards = 3; // taille du booster bonus
 
   String _uid() => Supabase.instance.client.auth.currentUser?.id ?? 'anon';
-  String _lastKey() => 'daily_last_day_${_uid()}';
-  String _streakKey() => 'daily_streak_${_uid()}';
-  String _bestKey() => 'daily_best_${_uid()}';
+  String _lastKey(String colId) => 'daily_last_day_${_uid()}_$colId';
+  String _streakKey(String colId) => 'daily_streak_${_uid()}_$colId';
+  String _bestKey(String colId) => 'daily_best_${_uid()}_$colId';
 
   // Numéro de jour local (sans l'heure) pour comparer hier / aujourd'hui.
   int _dayNumber(DateTime d) {
@@ -78,12 +78,12 @@ class DailyRewardService {
     return tomorrow.difference(now);
   }
 
-  /// État courant de la récompense (sans rien modifier).
-  Future<DailyRewardStatus> status() async {
+  /// État courant de la récompense pour [collectionId] (sans rien modifier).
+  Future<DailyRewardStatus> status(String collectionId) async {
     final prefs = await SharedPreferences.getInstance();
-    final last = prefs.getInt(_lastKey());
-    final stored = prefs.getInt(_streakKey()) ?? 0;
-    final best = prefs.getInt(_bestKey()) ?? 0;
+    final last = prefs.getInt(_lastKey(collectionId));
+    final stored = prefs.getInt(_streakKey(collectionId)) ?? 0;
+    final best = prefs.getInt(_bestKey(collectionId)) ?? 0;
     final today = _dayNumber(DateTime.now());
 
     // Série effective : rompue si on a sauté un jour complet.
@@ -115,12 +115,13 @@ class DailyRewardService {
     );
   }
 
-  /// Valide la réclamation du jour (avance la série + mémorise le jour).
+  /// Valide la réclamation du jour pour [collectionId]
+  /// (avance la série + mémorise le jour).
   /// À n'appeler QU'UNE fois les cartes effectivement tirées.
-  Future<DailyClaimResult> commitClaim() async {
+  Future<DailyClaimResult> commitClaim(String collectionId) async {
     final prefs = await SharedPreferences.getInstance();
-    final last = prefs.getInt(_lastKey());
-    final stored = prefs.getInt(_streakKey()) ?? 0;
+    final last = prefs.getInt(_lastKey(collectionId));
+    final stored = prefs.getInt(_streakKey(collectionId)) ?? 0;
     final today = _dayNumber(DateTime.now());
 
     // Sécurité : si déjà réclamé aujourd'hui, on ne double pas la série.
@@ -129,10 +130,10 @@ class DailyRewardService {
             ? (stored == 0 ? 1 : stored)
             : ((last != null && today - last == 1) ? stored + 1 : 1);
 
-    await prefs.setInt(_lastKey(), today);
-    await prefs.setInt(_streakKey(), newStreak);
-    final best = prefs.getInt(_bestKey()) ?? 0;
-    if (newStreak > best) await prefs.setInt(_bestKey(), newStreak);
+    await prefs.setInt(_lastKey(collectionId), today);
+    await prefs.setInt(_streakKey(collectionId), newStreak);
+    final best = prefs.getInt(_bestKey(collectionId)) ?? 0;
+    if (newStreak > best) await prefs.setInt(_bestKey(collectionId), newStreak);
 
     final cardCount = (newStreak % milestoneEvery == 0) ? boosterCards : 1;
     return DailyClaimResult(streak: newStreak, cardCount: cardCount);
@@ -167,17 +168,11 @@ class DailyRewardService {
     return all.where((c) => ids.contains(c.id)).toList();
   }
 
-  /// Parmi les collections fournies, celles qui ont au moins une carte
-  /// (donc dans lesquelles on peut tirer une récompense).
-  Future<List<CollectionModel>> claimableCollections(
-    List<CollectionModel> collections,
-  ) async {
-    final out = <CollectionModel>[];
-    for (final c in collections) {
-      final cat = await _catalogue(c.id);
-      if (cat.isNotEmpty) out.add(c);
-    }
-    return out;
+  /// True si [collectionId] a au moins une carte (donc si on peut y tirer
+  /// une récompense).
+  Future<bool> hasCards(String collectionId) async {
+    final cat = await _catalogue(collectionId);
+    return cat.isNotEmpty;
   }
 
   SavedCard _weightedPick(List<SavedCard> pool, math.Random rng) {

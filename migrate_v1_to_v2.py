@@ -13,7 +13,8 @@ import urllib.error
 V1_URL          = "https://mmqxwuavksjnrdzwqogu.supabase.co"
 USER_ID         = "eff36a49-2838-45f7-9022-9c0497bbd3a0"
 COLLECTION_CODE = "Q2RZVL"
-ALSO_ADD_TO_CATALOG = False
+# COPIE, pas deplacement : chaque carte migree reste dans le catalogue admin
+# (collection_cards) ET apparait dans la collection personnelle (user_collection_cards).
 RARITY_INDEX = {"common": 0, "uncommon": 1, "rare": 2, "epic": 3, "legendary": 4}
 
 V1_ANON_KEY    = os.environ.get("V1_ANON_KEY", "").strip()
@@ -72,7 +73,15 @@ _, raw = request(
     V2_HEADERS,
 )
 existing_ids = {str(row["card_id"]) for row in json.loads(raw)}
-print("  deja presentes :", len(existing_ids))
+print("  deja presentes (ma collection) :", len(existing_ids))
+
+_, raw = request(
+    V2_URL + "/rest/v1/collection_cards?select=card_id"
+    + "&collection_id=eq." + COLLECTION_ID,
+    V2_HEADERS,
+)
+catalog_ids = {str(row["card_id"]) for row in json.loads(raw)}
+print("  deja presentes (catalogue admin) :", len(catalog_ids))
 
 
 print("Lecture des cartes de la V1...")
@@ -159,7 +168,9 @@ for card in to_migrate:
 
     try:
         request(V2_URL + "/rest/v1/user_collection_cards", V2_HEADERS, "POST", row)
-        if ALSO_ADD_TO_CATALOG:
+        # Copie vers le catalogue admin aussi, sauf si deja cataloguee
+        # (ex. par add_to_catalogue.py) pour ne jamais creer de doublon.
+        if cid not in catalog_ids:
             try:
                 request(V2_URL + "/rest/v1/collection_cards", V2_HEADERS, "POST", {
                     "collection_id": COLLECTION_ID,
@@ -168,8 +179,9 @@ for card in to_migrate:
                     "card_rarity": rarity,
                     "added_by": USER_ID,
                 })
-            except Exception:
-                pass
+                catalog_ids.add(cid)
+            except Exception as e:
+                print("    (catalogue non mis a jour pour", name, ":", e, ")")
         migrated += 1
         print("  OK :", name, "(" + rarity + ")", "" if image_b64 else "[sans image]")
     except urllib.error.HTTPError as e:

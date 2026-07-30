@@ -6,12 +6,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'collection_detail_screen.dart';
-import 'daily_reward_card.dart';
+import 'community_screen.dart';
+import 'community_service.dart';
 import 'arcade_theme.dart';
 
 // Accent arcade par collection (déterministe sur l'id) — or / teal / corail / épique
@@ -255,22 +254,26 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                 actions: [
                   IconButton(
                     icon: const Icon(
+                      Icons.travel_explore_rounded,
+                      color: Arcade.cream,
+                    ),
+                    tooltip: 'Communauté',
+                    onPressed:
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CommunityScreen(),
+                          ),
+                        ).then((_) => _load()),
+                  ),
+                  IconButton(
+                    icon: const Icon(
                       Icons.refresh_rounded,
                       color: Arcade.cream,
                     ),
                     onPressed: _load,
                   ),
                 ],
-              ),
-              // ── Bandeau « Récompense du jour » ──────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: DailyRewardBanner(
-                    collections: _collections,
-                    onClaimed: _load,
-                  ),
-                ),
               ),
               if (_loading)
                 const SliverFillRemaining(
@@ -401,22 +404,16 @@ class _CollectionCardState extends State<_CollectionCard> {
       PackSystem.canOpenPack(widget.collection.id),
       CollectionService.instance.getMemberCount(widget.collection.id),
       CollectionService.instance.getCollectionCardIds(widget.collection.id),
+      CollectionService.instance.getOwnedCardCount(widget.collection.id),
     ]);
 
     final r = results[0] as Duration;
     final c = results[1] as bool;
     final members = results[2] as int;
     final cardIds = results[3] as List<String>;
-
-    final prefs = await SharedPreferences.getInstance();
-    final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
-    // ✨ FIX : on ne compte que les cartes encore présentes dans le catalogue
-    // (les cartes supprimées de la collection ne gonflent plus le compteur)
-    final catalogueIds = cardIds.toSet();
-    final obtained =
-        (prefs.getStringList('obtained_${uid}_${widget.collection.id}') ?? [])
-            .where(catalogueIds.contains)
-            .length;
+    // ✅ SOURCE UNIQUE : le serveur fait foi, comme le DEX.
+    // Fini le cache SharedPreferences qui pouvait diverger.
+    final obtained = results[4] as int;
 
     if (mounted) {
       setState(() {
@@ -756,6 +753,7 @@ class _EditCollectionSheet extends StatefulWidget {
 class _EditCollectionSheetState extends State<_EditCollectionSheet> {
   late int _cooldown;
   late bool _membersCanAdd;
+  late bool _isPublic;
   Uint8List? _newImageBytes;
   bool _saving = false;
   final _cooldowns = [1, 2, 3, 6, 12, 24];
@@ -765,6 +763,7 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
     super.initState();
     _cooldown = widget.collection.packCooldownHours;
     _membersCanAdd = widget.collection.membersCanAddCards;
+    _isPublic = widget.collection.isPublic;
   }
 
   Future<void> _pickImage() async {
@@ -787,6 +786,17 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
         packCooldownHours: _cooldown,
         membersCanAddCards: _membersCanAdd,
       );
+      // ⚠️ Non bloquant : si la colonne `is_public` n'existe pas encore en
+      // base, l'échec ne doit PAS annuler l'enregistrement du reste
+      // (couverture, cooldown, permissions).
+      try {
+        await CommunityService.instance.setPublic(
+          widget.collection.id,
+          _isPublic,
+        );
+      } catch (e) {
+        debugPrint('⚠️ setPublic (collection non publiée) : $e');
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -956,6 +966,45 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
                   value: _membersCanAdd,
                   onChanged: (v) => setState(() => _membersCanAdd = v),
                   activeColor: Arcade.gold,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Arcade.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Arcade.line),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.travel_explore_rounded,
+                  color: Arcade.creamDim,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Visible dans la communauté',
+                        style: Arcade.body(size: 13, weight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Les autres joueurs pourront la découvrir et la rejoindre',
+                        style: Arcade.body(size: 11, color: Arcade.creamFaint),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _isPublic,
+                  onChanged: (v) => setState(() => _isPublic = v),
+                  activeColor: Arcade.teal,
                 ),
               ],
             ),

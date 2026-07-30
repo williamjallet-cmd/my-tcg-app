@@ -23,6 +23,7 @@ class CollectionModel {
   final String? imageUrl;
   final int packCooldownHours;
   final bool membersCanAddCards;
+  final bool isPublic;
 
   // ── Personnalisation du pack ──────────────────────────────────────────────
   final String? packTitle;
@@ -39,6 +40,7 @@ class CollectionModel {
     this.imageUrl,
     this.packCooldownHours = 3,
     this.membersCanAddCards = true,
+    this.isPublic = false,
     this.packTitle,
     this.packSubtitle,
     this.packImageUrl,
@@ -57,6 +59,7 @@ class CollectionModel {
     imageUrl: m['image_url'] as String?,
     packCooldownHours: (m['pack_cooldown_hours'] as int?) ?? 3,
     membersCanAddCards: (m['members_can_add_cards'] as bool?) ?? true,
+    isPublic: (m['is_public'] as bool?) ?? false,
     packTitle: m['pack_title'] as String?,
     packSubtitle: m['pack_subtitle'] as String?,
     packImageUrl: m['pack_image_url'] as String?,
@@ -178,24 +181,22 @@ class CollectionService {
   String get _uid => _db.auth.currentUser!.id;
   String get userId => _uid;
 
+  /// ⚠️ Laisse remonter l'erreur : un échec d'upload (bucket `collections`
+  /// absent, policy RLS manquante, hors-ligne) doit être VISIBLE, sinon
+  /// l'image semble « ne pas s'enregistrer » sans aucun message.
   Future<String?> uploadCoverImage(Uint8List bytes, String collectionId) async {
-    try {
-      final path = 'covers/$collectionId.jpg';
-      await _db.storage
-          .from('collections')
-          .uploadBinary(
-            path,
-            bytes,
-            fileOptions: const FileOptions(
-              upsert: true,
-              contentType: 'image/jpeg',
-            ),
-          );
-      return _db.storage.from('collections').getPublicUrl(path);
-    } catch (e) {
-      debugPrint('⚠️ uploadCoverImage : $e');
-      return null;
-    }
+    final path = 'covers/$collectionId.jpg';
+    await _db.storage
+        .from('collections')
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(
+            upsert: true,
+            contentType: 'image/jpeg',
+          ),
+        );
+    return _db.storage.from('collections').getPublicUrl(path);
   }
 
   // Upload de l'image centrale du pack (réservé au proprio via updateCollection)
@@ -246,12 +247,18 @@ class CollectionService {
 
     final collection = CollectionModel.fromMap(res);
     if (imageBytes != null) {
-      final url = await uploadCoverImage(imageBytes, collection.id);
-      if (url != null) {
-        await _db
-            .from('collections')
-            .update({'image_url': url})
-            .eq('id', collection.id);
+      // La collection est déjà créée : un échec d'image ne doit pas
+      // annuler la création (l'image reste modifiable ensuite).
+      try {
+        final url = await uploadCoverImage(imageBytes, collection.id);
+        if (url != null) {
+          await _db
+              .from('collections')
+              .update({'image_url': url})
+              .eq('id', collection.id);
+        }
+      } catch (e) {
+        debugPrint('⚠️ createCollection (image de couverture) : $e');
       }
     }
     await _joinAsMember(collection.id);
@@ -600,6 +607,35 @@ class CollectionService {
   Future<List<SavedCard>> loadUserSavedCards(String collectionId) async {
     final entries = await loadUserCards(collectionId);
     return entries.map((e) => e.toSavedCard()).whereType<SavedCard>().toList();
+  }
+
+  /// ✨ Nombre de cartes réellement POSSÉDÉES par l'utilisateur, toutes
+  /// collections confondues. Comptage côté serveur (0 ligne téléchargée).
+  Future<int> getMyOwnedCardCount() async {
+    try {
+      return await _db
+          .from('user_collection_cards')
+          .count(CountOption.exact)
+          .eq('user_id', _uid);
+    } catch (e) {
+      debugPrint('⚠️ getMyOwnedCardCount : $e');
+      return 0;
+    }
+  }
+
+  /// ✨ Cartes possédées dans UNE collection (comptage serveur).
+  /// Source unique de vérité, partagée par l'écran Collections ET le DEX.
+  Future<int> getOwnedCardCount(String collectionId) async {
+    try {
+      return await _db
+          .from('user_collection_cards')
+          .count(CountOption.exact)
+          .eq('collection_id', collectionId)
+          .eq('user_id', _uid);
+    } catch (e) {
+      debugPrint('⚠️ getOwnedCardCount : $e');
+      return 0;
+    }
   }
 
   Future<void> _joinAsMember(String collectionId) async {

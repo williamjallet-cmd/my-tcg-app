@@ -34,6 +34,7 @@ import 'card_inspector_screen.dart';
 import 'pack_customizer_screen.dart';
 import 'manage_members_screen.dart';
 import 'streak_service.dart';
+import 'daily_reward_card.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 //  TOKENS DE DESIGN
@@ -148,6 +149,15 @@ const _dropLabels = {
   Rarity.rare: '14%',
   Rarity.epic: '6%',
   Rarity.legendary: '2%',
+};
+
+// ✨ FUSION GOLD — exemplaires requis pour transformer une carte en GOLD
+const _goldCost = {
+  Rarity.common: 30,
+  Rarity.uncommon: 20,
+  Rarity.rare: 15,
+  Rarity.epic: 6,
+  Rarity.legendary: 3,
 };
 
 SavedCard _weightedPick(List<SavedCard> pool, math.Random rng) {
@@ -441,6 +451,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   // ✨ Polish : doublons (quantité par carte) + badge NEW (cartes non consultées)
   Map<String, int> _qtyByCard = {};
   Set<String> _seenIds = {};
+  Set<String> _goldIds = {};
   String _sortBy = 'rarity';
   bool _sortAsc = true;
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
@@ -591,6 +602,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
     // 2) Synchronisation Supabase en arrière-plan (ne bloque pas l'affichage)
     final qty = <String, int>{..._qtyByCard};
+    final gold = <String>{..._goldIds};
     try {
       final remoteEntries = await CollectionService.instance.loadUserCards(
         widget.collection.id,
@@ -601,9 +613,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       // en tant qu'admin ou héritées d'anciennes versions.
       obtIds.clear();
       qty.clear();
+      gold.clear();
       for (final entry in remoteEntries) {
         obtIds.add(entry.cardId);
         qty[entry.cardId] = entry.quantity;
+        if (entry.isGold) gold.add(entry.cardId);
         final alreadyLocal = all.any((c) => c.id == entry.cardId);
         final alreadyQueued = newCards.any((c) => c.id == entry.cardId);
         if (!alreadyLocal && !alreadyQueued) {
@@ -669,20 +683,80 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         _obtainedCards = all.where((c) => obtIds.contains(c.id)).toList();
         _catalogueIds = catIds;
         _qtyByCard = qty;
+        _goldIds = gold;
         _loading = false;
       });
     }
   }
 
-  // ✨ Badge NEW : marque une carte comme consultée
-  Future<void> _markSeen(String cardId) async {
-    if (_seenIds.contains(cardId)) return;
-    setState(() => _seenIds.add(cardId));
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      _seenKey(widget.collection.id),
-      _seenIds.toList(),
+  // ✨ FUSION GOLD : confirmation puis fusion (consomme les exemplaires)
+  Future<void> _confirmFuse(SavedCard card) async {
+    final cost = _goldCost[card.rarity]!;
+    final have = _qtyByCard[card.id] ?? 1;
+    if (_goldIds.contains(card.id) || have < cost) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (_) => AlertDialog(
+            backgroundColor: _surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: _gold, width: 1.5),
+            ),
+            title: Text(
+              '⚡ Fusion GOLD',
+              style: _arcade(size: 18, color: _gold),
+            ),
+            content: Text(
+              'Fusionner $cost exemplaires de « ${card.name} » pour obtenir '
+              'sa version GOLD permanente ?\n\n'
+              'Les exemplaires utilisés seront consommés.',
+              style: _body(size: 13.5, color: _creamDim),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('Annuler', style: _body(color: _creamDim)),
+              ),
+              GestureDetector(
+                onTap: () => Navigator.pop(context, true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [_gold, _goldDeep]),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '⚡ Fusionner',
+                    style: _body(
+                      color: const Color(0xFF2A1C00),
+                      weight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
     );
+    if (confirmed != true) return;
+
+    final ok = await CollectionService.instance.fuseCardToGold(
+      widget.collection.id,
+      card.id,
+      cost,
+    );
+    if (!mounted) return;
+    if (ok) {
+      HapticFeedback.heavyImpact();
+      _msg('🥇 « ${card.name} » est passée GOLD !');
+      await _loadCards();
+    } else {
+      _msg('Fusion impossible (pas assez d\'exemplaires ?)', err: true);
+    }
   }
 
   // FIX 1 : plus de fallback _allCards → isolation stricte par collection
@@ -715,6 +789,14 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       key,
       {...existing, ...packCards.map((c) => c.id)}.toList(),
     );
+    // ✨ Badge NEW : seules les cartes de CE pack portent le badge ;
+    // tout le reste passe en « déjà vu » jusqu'au prochain pack.
+    final packIds = packCards.map((c) => c.id).toSet();
+    await prefs.setStringList(
+      _seenKey(widget.collection.id),
+      ({...existing, ..._obtainedCards.map((c) => c.id)}
+        ..removeAll(packIds)).toList(),
+    );
     _startTimer();
     if (!mounted) return;
     await Navigator.push(
@@ -737,6 +819,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             ),
       ),
     );
+    // ✨ Retour du pack → onglet Cartes directement (badges NEW visibles)
+    if (mounted) _tabCtrl.animateTo(1);
     await _loadCards();
     _startTimer();
   }
@@ -882,9 +966,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       ),
     ),
     flexibleSpace: FlexibleSpaceBar(
-      titlePadding: const EdgeInsets.only(left: 60, bottom: 16, right: 16),
+      centerTitle: true,
+      titlePadding: const EdgeInsets.only(left: 60, right: 60, bottom: 18),
       title: Text(
         widget.collection.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: _arcade(
           size: 19,
           color: Colors.white,
@@ -894,7 +981,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       background: Stack(
         fit: StackFit.expand,
         children: [
-          // dégradé série
+          // dégradé série (fond de secours si pas d'image)
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -906,32 +993,47 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             ),
           ),
           _rayBurst(p[1], 0.12),
-          if (widget.collection.imageUrl != null)
-            Opacity(
-              opacity: 0.15,
-              child: Image.network(
-                widget.collection.imageUrl!,
-                fit: BoxFit.cover,
-                cacheWidth: 600,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          // ✨ BANNIÈRE : l'image de la collection en plein cadre
+          if (widget.collection.imageUrl != null) ...[
+            Image.network(
+              widget.collection.imageUrl!,
+              fit: BoxFit.cover,
+              cacheWidth: 900,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+            // voile dégradé : garde le titre lisible quelle que soit l'image
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x40000000),
+                    Color(0x99000000),
+                    Color(0xD90D0A16),
+                  ],
+                  stops: [0.0, 0.55, 1.0],
+                ),
               ),
             ),
+          ],
+          // badges déplacés en HAUT à droite pour ne pas gêner le titre centré
           Positioned(
-            bottom: 16,
+            top: 14,
             right: 16,
             child: Row(
               children: [
                 _pixelBadge(
                   '⏱ ${widget.collection.cooldownLabel}',
                   color: Colors.white,
-                  bg: Colors.black.withValues(alpha: 0.3),
+                  bg: Colors.black.withValues(alpha: 0.35),
                   borderColor: Colors.white.withValues(alpha: 0.3),
                 ),
                 const SizedBox(width: 8),
                 _pixelBadge(
                   '🃏 ${_catalogue.length}',
                   color: Colors.white,
-                  bg: Colors.black.withValues(alpha: 0.3),
+                  bg: Colors.black.withValues(alpha: 0.35),
                   borderColor: Colors.white.withValues(alpha: 0.3),
                 ),
               ],
@@ -949,6 +1051,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _canOpen ? _openBtn(p) : _timerWidget(),
+        const SizedBox(height: 16),
+        DailyRewardBanner(collection: _col, onClaimed: _loadCards),
         if (_col.isOwnedBy(widget.myUserId)) ...[
           const SizedBox(height: 12),
           _customizePackBtn(),
@@ -1097,10 +1201,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   // ✨ Jauge de complétion du dex — globale + détail par rareté
   Widget _dexHeader() {
     final cat = _catalogue;
-    if (cat.isEmpty) return const SizedBox.shrink();
+    if (cat.isEmpty && _catalogueIds.isEmpty) return const SizedBox.shrink();
     final obtIds = _obtainedCards.map((c) => c.id).toSet();
-    final total = cat.length;
-    final owned = cat.where((c) => obtIds.contains(c.id)).length;
+    // ✅ SOURCE UNIQUE : le total vient du catalogue SERVEUR (_catalogueIds),
+    // strictement le même chiffre que l'écran Collections. Avant, on comptait
+    // les cartes reconstruites localement — d'où le décalage 44 vs 71.
+    final total = _catalogueIds.length;
+    final owned = _catalogueIds.where(obtIds.contains).length;
     final pct = total == 0 ? 0.0 : owned / total;
     final complete = owned == total;
 
@@ -1338,7 +1445,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             revealed: revealed,
             copies: _qtyByCard[c.id] ?? 1,
             isNew: revealed && !_seenIds.contains(c.id),
-            onSeen: () => _markSeen(c.id),
+            isGold: _goldIds.contains(c.id),
+            onFuse: revealed ? () => _confirmFuse(c) : null,
           ),
         );
       },
@@ -1612,10 +1720,11 @@ class _CardTile extends StatelessWidget {
   final bool revealed;
   final bool isAdmin;
   final VoidCallback? onDelete;
-  // ✨ Polish : compteur de doublons + badge NEW
+  // ✨ Polish : compteur de doublons + badge NEW + fusion GOLD
   final int copies;
   final bool isNew;
-  final VoidCallback? onSeen;
+  final bool isGold;
+  final VoidCallback? onFuse;
   const _CardTile({
     required this.card,
     required this.revealed,
@@ -1623,7 +1732,8 @@ class _CardTile extends StatelessWidget {
     this.onDelete,
     this.copies = 1,
     this.isNew = false,
-    this.onSeen,
+    this.isGold = false,
+    this.onFuse,
   });
 
   Color get _rc => _rarColors[card.rarity]!;
@@ -1681,7 +1791,6 @@ class _CardTile extends StatelessWidget {
     }
     return GestureDetector(
       onTap: () {
-        onSeen?.call();
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -1704,8 +1813,33 @@ class _CardTile extends StatelessWidget {
       child: Stack(
         children: [
           _front(),
-          // ✨ Badge NEW — carte pas encore consultée
-          if (isNew)
+          // 🥇 Badge GOLD
+          if (isGold)
+            Positioned(
+              top: 4,
+              left: 4,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(5, 3, 5, 2),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFE89A), _gold, _goldDeep],
+                  ),
+                  borderRadius: BorderRadius.circular(5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _gold.withValues(alpha: 0.7),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: Text(
+                  'GOLD',
+                  style: _pixel(size: 6.5, color: const Color(0xFF2A1C00)),
+                ),
+              ),
+            ),
+          // ✨ Badge NEW — cartes du dernier pack ouvert
+          if (isNew && !isGold)
             Positioned(
               top: 4,
               left: 4,
@@ -1745,6 +1879,43 @@ class _CardTile extends StatelessWidget {
                 child: Text(
                   '×$copies',
                   style: _pixel(size: 7.5, color: _cream),
+                ),
+              ),
+            ),
+          // ⚡ Bouton FUSION — assez d'exemplaires pour passer GOLD
+          if (!isGold &&
+              !isAdmin &&
+              onFuse != null &&
+              copies >= (_goldCost[card.rarity] ?? 999))
+            Positioned(
+              bottom: 22,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: onFuse,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [_gold, _goldDeep],
+                      ),
+                      borderRadius: BorderRadius.circular(7),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _gold.withValues(alpha: 0.65),
+                          blurRadius: 12,
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      '⚡ FUSION',
+                      style: _pixel(size: 7, color: const Color(0xFF2A1C00)),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1816,7 +1987,7 @@ class _CardTile extends StatelessWidget {
 
   Widget _front() {
     final rc = _rc;
-    final isLeg = card.rarity == Rarity.legendary;
+    final isLeg = card.rarity == Rarity.legendary || isGold;
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(

@@ -17,11 +17,13 @@ import 'package:flutter/foundation.dart';
 
 enum LayerType { image, text, sticker }
 
-/// Rôle spécial d'une couche texte.
+/// Rôle spécial d'une couche.
 /// cardName / cardRarity : positionnables et transformables comme les autres,
-/// mais leur contenu est piloté par la carte (nom, rareté) et elles ne
-/// peuvent être ni supprimées ni dupliquées.
-enum LayerRole { normal, cardName, cardRarity }
+/// mais leur contenu est piloté par la carte et elles ne peuvent être ni
+/// supprimées ni dupliquées.
+/// background : image de fond, verrouillée tout en bas de la pile,
+/// rendue plein cadre (bgFit) avec assombrissement optionnel (bgDarken).
+enum LayerRole { normal, cardName, cardRarity, background }
 
 class CardLayer {
   final String id;
@@ -39,6 +41,10 @@ class CardLayer {
   // ── Image ─────────────────────────────────────────────────
   Uint8List? bytes;
   String? storagePath; // chemin Supabase Storage (null = pas encore uploadé)
+
+  // ── Fond (role == background, bloc 4) ─────────────────────
+  int bgFit; // 0 = remplir (cover), 1 = ajuster (contain)
+  double bgDarken; // 0.0 → 0.7 : voile noir par-dessus l'image
 
   // ── Texte ─────────────────────────────────────────────────
   String text;
@@ -70,6 +76,8 @@ class CardLayer {
     this.visible = true,
     this.bytes,
     this.storagePath,
+    this.bgFit = 0,
+    this.bgDarken = 0,
     this.text = '',
     this.fontSize = 16,
     this.color = 0xFFFFFFFF,
@@ -108,6 +116,8 @@ class CardLayer {
     visible: visible,
     bytes: bytes,
     storagePath: storagePath,
+    bgFit: bgFit,
+    bgDarken: bgDarken,
     text: text,
     fontSize: fontSize,
     color: color,
@@ -144,6 +154,8 @@ class CardLayer {
     'opacity': opacity,
     'visible': visible,
     'storagePath': storagePath,
+    'bgFit': bgFit,
+    'bgDarken': bgDarken,
     if (includeBytes)
       'bytes':
           (storagePath == null && bytes != null) ? base64Encode(bytes!) : null,
@@ -179,6 +191,8 @@ class CardLayer {
     visible: (j['visible'] as bool?) ?? true,
     bytes: j['bytes'] != null ? base64Decode(j['bytes'] as String) : null,
     storagePath: j['storagePath'] as String?,
+    bgFit: (j['bgFit'] as int?) ?? 0,
+    bgDarken: (j['bgDarken'] as num?)?.toDouble() ?? 0,
     text: (j['text'] as String?) ?? '',
     fontSize: (j['fontSize'] as num?)?.toDouble() ?? 16,
     color: (j['color'] as int?) ?? 0xFFFFFFFF,
