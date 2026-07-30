@@ -21,6 +21,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'card_layer.dart';
 import 'card_model.dart';
+import 'error_reporter.dart';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //   IMAGE SUPPLÉMENTAIRE (ancien format — conservé pour rétro-compat)
@@ -277,8 +278,11 @@ List<SavedCard> _decodeOldCardsInBackground(String data) {
   for (final e in list) {
     try {
       cards.add(CardStorage.fromJson(e as Map<String, dynamic>));
-    } catch (_) {
-      // carte corrompue ignorée
+    } catch (err) {
+      // Carte corrompue : ignorée pour ne pas faire échouer toute la
+      // migration. debugPrint et non reportError : on est dans un isolate
+      // de fond (compute), sans accès à l'interface.
+      debugPrint('⚠️ Migration : carte illisible ignorée — $err');
     }
   }
   return cards;
@@ -685,8 +689,18 @@ class CardStorage {
     List<SavedCard> cards;
     try {
       cards = await compute(_decodeOldCardsInBackground, old);
-    } catch (_) {
-      cards = [];
+    } catch (e) {
+      // ⚠️ Avant : `cards = []` puis on écrivait quand même _metaKey → la
+      // migration était marquée « terminée avec 0 carte » DÉFINITIVEMENT,
+      // et toutes les anciennes cartes devenaient invisibles sans un mot.
+      // Maintenant : on signale et on n'écrit RIEN, donc la migration sera
+      // retentée au prochain lancement. L'ancienne clé reste intacte.
+      reportError(
+        'Migration de tes anciennes cartes',
+        e,
+        level: ErrorLevel.dataLoss,
+      );
+      return;
     }
 
     final dir = await _imagesDir();

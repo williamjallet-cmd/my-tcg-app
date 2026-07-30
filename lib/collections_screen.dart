@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'card_storage.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'collection_detail_screen.dart';
@@ -404,23 +405,32 @@ class _CollectionCardState extends State<_CollectionCard> {
       PackSystem.canOpenPack(widget.collection.id),
       CollectionService.instance.getMemberCount(widget.collection.id),
       CollectionService.instance.getCollectionCardIds(widget.collection.id),
-      CollectionService.instance.getOwnedCardCount(widget.collection.id),
+      CollectionService.instance.getMyOwnedCardIds(widget.collection.id),
+      CardStorage.loadCards(),
     ]);
 
     final r = results[0] as Duration;
     final c = results[1] as bool;
     final members = results[2] as int;
     final cardIds = results[3] as List<String>;
-    // ✅ SOURCE UNIQUE : le serveur fait foi, comme le DEX.
-    // Fini le cache SharedPreferences qui pouvait diverger.
-    final obtained = results[4] as int;
+    final ownedIds = (results[4] as List<String>).toSet();
+    final localCards = results[5] as List<SavedCard>;
+
+    // ✅ RÈGLE COMMUNE avec le DEX : seules les cartes RÉELLES comptent.
+    // Une entrée de catalogue orpheline (sans card_data, n'affichant aucune
+    // carte) ne gonfle plus le total — d'où le même chiffre sur les 2 écrans.
+    final catalogueIds = cardIds.toSet();
+    final realIds =
+        localCards.map((card) => card.id).where(catalogueIds.contains).toSet();
+    final total = realIds.length;
+    final obtained = ownedIds.where(realIds.contains).length;
 
     if (mounted) {
       setState(() {
         _remaining = r;
         _canOpen = c;
         _memberCount = members;
-        _totalCards = cardIds.length;
+        _totalCards = total;
         _obtainedCards = obtained;
       });
     }

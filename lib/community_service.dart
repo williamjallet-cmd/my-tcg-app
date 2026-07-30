@@ -7,9 +7,9 @@
 // cartes reste unique et partagé ; la progression (user_collection_cards)
 // reste individuelle, comme pour toutes les collections existantes.
 
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'collection_service.dart';
+import 'error_reporter.dart';
 import 'profile_service.dart';
 
 class CommunityCollection {
@@ -127,7 +127,9 @@ class CommunityService {
         );
       }).toList();
     } catch (e) {
-      debugPrint('⚠️ browsePublicCollections : $e');
+      // Sans signalement, l'écran affichait « aucune collection publique »
+      // alors que la requête avait simplement échoué.
+      reportError('Chargement des collections communautaires', e);
       return [];
     }
   }

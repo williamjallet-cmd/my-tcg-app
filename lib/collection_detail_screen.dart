@@ -969,7 +969,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       centerTitle: true,
       titlePadding: const EdgeInsets.only(left: 60, right: 60, bottom: 18),
       title: Text(
-        widget.collection.name,
+        _col.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: _arcade(
@@ -993,13 +993,21 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             ),
           ),
           _rayBurst(p[1], 0.12),
-          // ✨ BANNIÈRE : l'image de la collection en plein cadre
-          if (widget.collection.imageUrl != null) ...[
+          // ✨ BANNIÈRE : l'image de la collection en plein cadre.
+          // ⚠️ `_col` et non `widget.collection` : sinon la nouvelle image
+          // n'apparaît qu'au prochain redémarrage de l'écran.
+          if (_col.imageUrl != null) ...[
             Image.network(
-              widget.collection.imageUrl!,
+              _col.imageUrl!,
               fit: BoxFit.cover,
               cacheWidth: 900,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              errorBuilder: (_, error, __) {
+                // Cause la plus fréquente : le bucket Storage `collections`
+                // n'est pas PUBLIC → l'URL renvoie 403 et l'image est ignorée.
+                debugPrint('⚠️ Bannière « ${_col.name} » illisible : $error');
+                debugPrint('   URL : ${_col.imageUrl}');
+                return const SizedBox.shrink();
+              },
             ),
             // voile dégradé : garde le titre lisible quelle que soit l'image
             const DecoratedBox(
@@ -1024,7 +1032,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             child: Row(
               children: [
                 _pixelBadge(
-                  '⏱ ${widget.collection.cooldownLabel}',
+                  '⏱ ${_col.cooldownLabel}',
                   color: Colors.white,
                   bg: Colors.black.withValues(alpha: 0.35),
                   borderColor: Colors.white.withValues(alpha: 0.3),
@@ -1201,13 +1209,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   // ✨ Jauge de complétion du dex — globale + détail par rareté
   Widget _dexHeader() {
     final cat = _catalogue;
-    if (cat.isEmpty && _catalogueIds.isEmpty) return const SizedBox.shrink();
+    if (cat.isEmpty) return const SizedBox.shrink();
     final obtIds = _obtainedCards.map((c) => c.id).toSet();
-    // ✅ SOURCE UNIQUE : le total vient du catalogue SERVEUR (_catalogueIds),
-    // strictement le même chiffre que l'écran Collections. Avant, on comptait
-    // les cartes reconstruites localement — d'où le décalage 44 vs 71.
-    final total = _catalogueIds.length;
-    final owned = _catalogueIds.where(obtIds.contains).length;
+    // ✅ RÈGLE COMMUNE avec l'écran Collections : on ne compte que les cartes
+    // RÉELLES (reconstruites). Une entrée de catalogue orpheline — sans
+    // card_data, donc n'affichant aucune carte — ne gonfle plus le total.
+    final total = cat.length;
+    final owned = cat.where((c) => obtIds.contains(c.id)).length;
     final pct = total == 0 ? 0.0 : owned / total;
     final complete = owned == total;
 

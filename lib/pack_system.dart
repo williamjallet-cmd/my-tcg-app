@@ -1,6 +1,7 @@
 // pack_system.dart — timer lié à l'utilisateur + sync Supabase
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'error_reporter.dart';
 
 class PackSystem {
   static const _defaultCooldown = 3;
@@ -58,7 +59,9 @@ class PackSystem {
       final latest = (local != null && local.isAfter(remote)) ? local : remote;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_key(collectionId), latest.millisecondsSinceEpoch);
-    } catch (_) {}
+    } catch (e) {
+      reportError('Synchronisation du minuteur de pack', e);
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -83,7 +86,10 @@ class PackSystem {
               .eq('id', collectionId)
               .maybeSingle();
       return (res?['pack_cooldown_hours'] as int?) ?? _defaultCooldown;
-    } catch (_) {
+    } catch (e) {
+      // Repli sur 3h : sans signalement, un cooldown personnalisé ignoré
+      // passait pour un bug de l'app.
+      reportError('Lecture du délai entre packs', e);
       return _defaultCooldown;
     }
   }
@@ -102,7 +108,11 @@ class PackSystem {
         'user_id': uid,
         'last_pack_opened': time.toUtc().toIso8601String(),
       });
-    } catch (_) {}
+    } catch (e) {
+      // Non enregistré côté serveur → le minuteur repartira à zéro sur un
+      // autre appareil. À signaler, sans bloquer l'ouverture du pack.
+      reportError('Enregistrement de l\'heure du pack', e);
+    }
   }
 
   /// Formate une durée en "2h 34m" ou "Disponible !"

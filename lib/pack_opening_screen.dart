@@ -274,12 +274,33 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
         widget.collectionId,
         widget.cards,
       );
-    } catch (_) {
-    } finally {
       if (mounted) {
         setState(() => _isSaving = false);
         Navigator.pop(context);
       }
+    } catch (e) {
+      // ⚠️ On NE quitte PAS l'écran : sortir ici ferait disparaître les
+      // cartes du pack définitivement. Le joueur peut réessayer.
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Tes cartes n\'ont pas pu être enregistrées.\n'
+              '${e.toString().replaceFirst('Exception: ', '')}',
+              style: _arcade(size: 14, color: Colors.white),
+            ),
+            backgroundColor: const Color(0xFFFF5D73),
+            duration: const Duration(seconds: 10),
+            action: SnackBarAction(
+              label: 'RÉESSAYER',
+              textColor: Colors.white,
+              onPressed: _saveAndReturn,
+            ),
+          ),
+        );
     }
   }
 
@@ -1237,12 +1258,17 @@ class _ArcadeCard extends StatelessWidget {
   final bool glow;
   final VoidCallback? onTap;
 
+  /// Badge de rareté en pied de carte. Désactivé lors de la révélation :
+  /// le bandeau de rareté au-dessus de la carte le remplace.
+  final bool showRarity;
+
   const _ArcadeCard({
     required this.card,
     required this.w,
     this.faceDown = false,
     this.glow = false,
     this.onTap,
+    this.showRarity = true,
   });
 
   @override
@@ -1407,32 +1433,33 @@ class _ArcadeCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                // footer : badge rareté
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    w * 0.045,
-                    w * 0.04,
-                    w * 0.045,
-                    w * 0.05,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: rc),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _rarityName(card.rarity).toUpperCase(),
-                        style: _pixel(size: w * 0.05, color: rc),
+                // footer : badge rareté (masqué pendant la révélation)
+                if (showRarity)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      w * 0.045,
+                      w * 0.04,
+                      w * 0.045,
+                      w * 0.05,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: rc),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _rarityName(card.rarity).toUpperCase(),
+                          style: _pixel(size: w * 0.05, color: rc),
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1671,6 +1698,7 @@ class _FlipCardState extends State<_FlipCard>
                         w: widget.width,
                         glow: true,
                         onTap: widget.onTap,
+                        showRarity: false, // bandeau de rareté au-dessus
                       ),
                     )
                     : _ArcadeCard(

@@ -17,6 +17,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'card_model.dart';
 import 'card_storage.dart';
 import 'collection_service.dart';
+import 'error_reporter.dart';
 
 // ── Résultats exposés à l'UI ────────────────────────────────────────────────
 
@@ -164,7 +165,11 @@ class DailyRewardService {
       ids.addAll(
         await CollectionService.instance.getCollectionCardIds(collectionId),
       );
-    } catch (_) {}
+    } catch (e) {
+      // Repli sur le catalogue local : le tirage reste possible, mais
+      // potentiellement incomplet — l'utilisateur doit le savoir.
+      reportError('Chargement du catalogue pour la récompense', e);
+    }
     return all.where((c) => ids.contains(c.id)).toList();
   }
 

@@ -4,8 +4,8 @@
 //    L'unicité réelle est garantie par une contrainte UNIQUE en base ;
 //    la vérification côté app sert juste à afficher un message clair.
 
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'error_reporter.dart';
 
 class UserProfile {
   final String id;
@@ -60,7 +60,8 @@ class ProfileService {
           await _db.from('profiles').select().eq('id', _myId).maybeSingle();
       if (res == null) return null;
       return UserProfile.fromMap(res);
-    } catch (_) {
+    } catch (e) {
+      reportError('Chargement de ton profil', e);
       return null;
     }
   }
@@ -100,7 +101,9 @@ class ProfileService {
               .maybeSingle();
       return res == null || res['id'] == _myId;
     } catch (e) {
-      debugPrint('⚠️ isUsernameAvailable : $e');
+      // Sans ce signalement, l'utilisateur voyait « pseudo déjà pris »
+      // alors que c'est la VÉRIFICATION qui a échoué (réseau, RLS…).
+      reportError('Vérification du pseudo', e);
       return false; // en cas de doute, on ne laisse pas passer
     }
   }
@@ -163,7 +166,13 @@ class ProfileService {
         final res =
             await _db.from('profiles').upsert(upsertData).select().single();
         return UserProfile.fromMap(res);
-      } catch (_) {
+      } catch (e) {
+        // Dernier recours épuisé : le profil n'est PAS enregistré.
+        reportError(
+          'Enregistrement de ton profil',
+          e,
+          level: ErrorLevel.dataLoss,
+        );
         return null;
       }
     }

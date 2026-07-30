@@ -13,6 +13,7 @@ import 'auth_service.dart';
 import 'auth_screen.dart';
 import 'profile_service.dart';
 import 'collection_service.dart';
+import 'error_reporter.dart';
 import 'secrets.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -253,6 +254,9 @@ class TCGApp extends StatelessWidget {
     return MaterialApp(
       title: 'TCG App',
       debugShowCheckedModeBanner: false,
+      // Permet aux services (sans BuildContext) d'afficher une erreur
+      // au lieu de la perdre dans la console — voir error_reporter.dart
+      scaffoldMessengerKey: appMessengerKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: _gold,
@@ -944,7 +948,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _uploading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      // L'avatar n'a pas été changé : le dire, sinon le joueur croit
+      // que l'app a simplement ignoré son choix.
+      reportError('Changement d\'avatar', e, level: ErrorLevel.dataLoss);
       if (mounted) setState(() => _uploading = false);
     }
   }

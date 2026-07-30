@@ -4,14 +4,16 @@
 // ✅ OPTIMISATIONS (audit juillet 2026) :
 //   • getMemberCount : comptage CÔTÉ SERVEUR (plus aucune ligne téléchargée)
 //   • saveUserCards  : requêtes GROUPÉES (2 allers-retours au lieu de 2 par carte)
-//   • Fin des erreurs silencieuses : chaque catch loggue via debugPrint
-//     → les erreurs RLS/réseau apparaissent enfin dans la console !
+//   • Fin des erreurs silencieuses : chaque échec passe par reportError()
+//     → les erreurs RLS/réseau s'affichent À L'ÉCRAN, pas seulement dans
+//       la console (invisible sur téléphone). Voir error_reporter.dart.
 //   • Signatures et comportements INCHANGÉS pour tous les appelants.
 
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'card_storage.dart';
+import 'error_reporter.dart';
 
 class CollectionModel {
   final String id;
@@ -131,7 +133,10 @@ class UserCardEntry {
     try {
       return CardStorage.fromJson(cardData!);
     } catch (e) {
-      debugPrint('⚠️ UserCardEntry.toSavedCard ($cardName) : $e');
+      // Libellé volontairement générique (sans le nom) : si plusieurs cartes
+      // sont illisibles, l'anti-spam du reporter les regroupe en un message.
+      debugPrint('⚠️ carte possédée illisible : $cardName');
+      reportError('Lecture d\'une de tes cartes', e);
       return null;
     }
   }
@@ -167,7 +172,8 @@ class CatalogCardEntry {
     try {
       return CardStorage.fromJson(cardData!);
     } catch (e) {
-      debugPrint('⚠️ CatalogCardEntry.toSavedCard ($cardName) : $e');
+      debugPrint('⚠️ carte du catalogue illisible : $cardName');
+      reportError('Lecture d\'une carte du catalogue', e);
       return null;
     }
   }
@@ -215,7 +221,7 @@ class CollectionService {
           );
       return _db.storage.from('collections').getPublicUrl(path);
     } catch (e) {
-      debugPrint('⚠️ uploadPackImage : $e');
+      reportError('Envoi de l\'image du pack', e, level: ErrorLevel.dataLoss);
       return null;
     }
   }
@@ -258,7 +264,11 @@ class CollectionService {
               .eq('id', collection.id);
         }
       } catch (e) {
-        debugPrint('⚠️ createCollection (image de couverture) : $e');
+        reportError(
+          'Envoi de l\'image de couverture',
+          e,
+          level: ErrorLevel.dataLoss,
+        );
       }
     }
     await _joinAsMember(collection.id);
@@ -319,11 +329,31 @@ class CollectionService {
     // On filtre seulement par id : certaines anciennes collections n'ont pas
     // owner_user_id renseigné (uniquement owner_device_id), ce qui faisait
     // échouer la mise à jour (PGRST116 = 0 ligne trouvée).
-    await _db.from('collections').update(updates).eq('id', collectionId);
+    //
+    // ⚠️ PIÈGE SUPABASE : un UPDATE bloqué par une règle RLS ne lève AUCUNE
+    // erreur — il modifie simplement 0 ligne. Sans le `.select()` ci-dessous,
+    // l'app affichait « enregistré » alors que rien n'avait changé
+    // (symptôme : l'image de couverture ne s'affiche jamais).
+    final updatedRows =
+        await _db
+            .from('collections')
+            .update(updates)
+            .eq('id', collectionId)
+            .select();
 
-    final res =
-        await _db.from('collections').select().eq('id', collectionId).single();
-    return CollectionModel.fromMap(res);
+    if ((updatedRows as List).isEmpty) {
+      throw Exception(
+        'Modification refusée par la base de données : aucune ligne modifiée.\n'
+        'Causes possibles : (1) aucune policy RLS `UPDATE` sur la table '
+        '`collections` — avec RLS activé, sans policy UPDATE tout est refusé ; '
+        '(2) la policy existe mais owner_user_id ne correspond pas à ton '
+        'identifiant (ancienne collection migrée).',
+      );
+    }
+
+    return CollectionModel.fromMap(
+      Map<String, dynamic>.from(updatedRows.first as Map),
+    );
   }
 
   Future<CollectionModel> joinByCode(String rawCode) async {
@@ -395,7 +425,7 @@ class CollectionService {
           .count(CountOption.exact)
           .eq('collection_id', collectionId);
     } catch (e) {
-      debugPrint('⚠️ getMemberCount : $e');
+      reportError('Comptage des membres', e);
       return 0;
     }
   }
@@ -431,7 +461,7 @@ class CollectionService {
           .map((r) => CatalogCardEntry.fromMap(r as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('⚠️ getCollectionCards : $e');
+      reportError('Chargement du catalogue', e);
       return [];
     }
   }
@@ -444,7 +474,7 @@ class CollectionService {
           .eq('collection_id', collectionId);
       return (res as List).map((r) => r['card_id'] as String).toList();
     } catch (e) {
-      debugPrint('⚠️ getCollectionCardIds : $e');
+      reportError('Chargement du catalogue', e);
       return [];
     }
   }
@@ -474,7 +504,7 @@ class CollectionService {
               .maybeSingle();
       return res != null && res['role'] == 'admin';
     } catch (e) {
-      debugPrint('⚠️ amIAdminOf : $e');
+      reportError('Vérification des droits admin', e);
       return false;
     }
   }
@@ -542,6 +572,7 @@ class CollectionService {
                 .eq('id', existing['id'] as String);
           } catch (e) {
             debugPrint('⚠️ saveUserCards (update ${byId[cardId]?.name}) : $e');
+            rethrow; // ⚠️ une carte perdue en silence = pire qu'une erreur
           }
         }
       }
@@ -551,7 +582,11 @@ class CollectionService {
         await _db.from('user_collection_cards').insert(toInsert);
       }
     } catch (e) {
+      // ⚠️ NE PLUS AVALER : un échec ici fait disparaître les cartes du pack
+      // (elles n'existent alors NI sur le serveur, NI dans « Mes cartes »).
+      // L'appelant doit pouvoir prévenir le joueur.
       debugPrint('⚠️ saveUserCards : $e');
+      rethrow;
     }
   }
 
@@ -584,7 +619,7 @@ class CollectionService {
           .eq('id', row['id'] as String);
       return true;
     } catch (e) {
-      debugPrint('⚠️ fuseCardToGold : $e');
+      reportError('Fusion GOLD', e, level: ErrorLevel.dataLoss);
       return false;
     }
   }
@@ -599,7 +634,7 @@ class CollectionService {
           .order('obtained_at', ascending: false);
       return (res as List).map((row) => UserCardEntry.fromMap(row)).toList();
     } catch (e) {
-      debugPrint('⚠️ loadUserCards : $e');
+      reportError('Chargement de tes cartes', e);
       return [];
     }
   }
@@ -618,23 +653,26 @@ class CollectionService {
           .count(CountOption.exact)
           .eq('user_id', _uid);
     } catch (e) {
-      debugPrint('⚠️ getMyOwnedCardCount : $e');
+      reportError('Comptage de tes cartes', e);
       return 0;
     }
   }
 
-  /// ✨ Cartes possédées dans UNE collection (comptage serveur).
-  /// Source unique de vérité, partagée par l'écran Collections ET le DEX.
-  Future<int> getOwnedCardCount(String collectionId) async {
+  /// ✨ Identifiants des cartes possédées dans UNE collection.
+  /// Renvoie les ids (et non un simple total) pour pouvoir les croiser avec
+  /// les cartes réellement affichables — même règle que le DEX.
+  /// Ne télécharge que les `card_id` (pas les `card_data`, très lourds).
+  Future<List<String>> getMyOwnedCardIds(String collectionId) async {
     try {
-      return await _db
+      final res = await _db
           .from('user_collection_cards')
-          .count(CountOption.exact)
+          .select('card_id')
           .eq('collection_id', collectionId)
           .eq('user_id', _uid);
+      return (res as List).map((r) => r['card_id'] as String).toList();
     } catch (e) {
-      debugPrint('⚠️ getOwnedCardCount : $e');
-      return 0;
+      reportError('Comptage de tes cartes', e);
+      return [];
     }
   }
 
