@@ -1,4 +1,18 @@
 // pack_system.dart — timer lié à l'utilisateur + sync Supabase
+//
+// ✅ CORRECTIF (31/07) :
+//   • _syncToSupabase : upsert CIBLÉ sur (collection_id, user_id).
+//     Avant, l'upsert visait la clé primaire (id) qu'on ne fournissait pas
+//     → PostgreSQL tentait un INSERT à chaque ouverture de pack, ce qui
+//       déclenchait l'erreur « device_id violates not-null constraint »
+//       et, une fois ce NOT NULL retiré, aurait créé des membres en double.
+//   • Les erreurs ne sont plus avalées silencieusement : elles s'affichent
+//     À L'ÉCRAN via reportError (la console est invisible sur téléphone).
+//     Voir error_reporter.dart.
+//   • _parseServerDate : Supabase renvoie « ...+00:00 » et non « ...Z ».
+//     L'ancien test `endsWith('Z')` ajoutait un second marqueur de fuseau
+//     → date invalide et synchro du minuteur en échec à chaque lancement.
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'error_reporter.dart';
@@ -25,7 +39,7 @@ class PackSystem {
     final now = DateTime.now().toUtc();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_key(collectionId), now.millisecondsSinceEpoch);
-    // FIX : on attend la sync pour s'assurer qu'elle est bien exécutée
+    // On attend la sync pour s'assurer qu'elle est bien exécutée
     await _syncToSupabase(collectionId, now);
   }
 
@@ -53,7 +67,7 @@ class PackSystem {
       if (res == null || res['last_pack_opened'] == null) return;
 
       final raw = res['last_pack_opened'] as String;
-      final remote = DateTime.parse(raw.endsWith('Z') ? raw : '${raw}Z');
+      final remote = _parseServerDate(raw);
 
       final local = await _getLocalTime(collectionId);
       final latest = (local != null && local.isAfter(remote)) ? local : remote;
@@ -65,6 +79,20 @@ class PackSystem {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /// Fuseau horaire déjà présent : « Z » ou un décalage « +02:00 » / « -0500 ».
+  static final _hasTimeZone = RegExp(r'(Z|[+-]\d{2}:?\d{2})$');
+
+  /// Convertit une date renvoyée par Supabase en DateTime UTC.
+  ///
+  /// ⚠️ PostgREST renvoie un décalage EXPLICITE (« 2026-05-24T12:56:14.181
+  /// +00:00 »), pas un « Z » final. L'ancien code ne testait que le « Z » et
+  /// ajoutait donc un second marqueur de fuseau → « ...+00:00Z », date
+  /// invalide, et la synchro du minuteur échouait à CHAQUE lancement.
+  static DateTime _parseServerDate(String raw) {
+    final normalized = _hasTimeZone.hasMatch(raw) ? raw : '${raw}Z';
+    return DateTime.parse(normalized).toUtc();
+  }
 
   static Future<DateTime?> _getTime(String collectionId) async {
     return _getLocalTime(collectionId);
@@ -94,8 +122,12 @@ class PackSystem {
     }
   }
 
-  // FIX : déclaré Future<void> au lieu de void pour pouvoir être attendu
-  // FIX : upsert() au lieu de update() → crée la ligne si elle n'existe pas
+  /// ✅ CORRIGÉ : l'upsert cible explicitement le couple (collection_id,
+  /// user_id). Il met donc à jour la ligne de membre existante au lieu
+  /// d'essayer d'en insérer une nouvelle.
+  ///
+  /// ⚠️ Nécessite la contrainte d'unicité créée par fix_device_id.sql :
+  ///     collection_members_collection_user_unique (collection_id, user_id)
   static Future<void> _syncToSupabase(
     String collectionId,
     DateTime time,
@@ -107,7 +139,7 @@ class PackSystem {
         'collection_id': collectionId,
         'user_id': uid,
         'last_pack_opened': time.toUtc().toIso8601String(),
-      });
+      }, onConflict: 'collection_id,user_id');
     } catch (e) {
       // Non enregistré côté serveur → le minuteur repartira à zéro sur un
       // autre appareil. À signaler, sans bloquer l'ouverture du pack.
