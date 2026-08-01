@@ -35,6 +35,7 @@ import 'pack_customizer_screen.dart';
 import 'manage_members_screen.dart';
 import 'streak_service.dart';
 import 'daily_reward_card.dart';
+import 'dev_tools.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 //  TOKENS DE DESIGN
@@ -152,11 +153,28 @@ const _dropLabels = {
 };
 
 // ✨ FUSION GOLD — exemplaires requis pour transformer une carte en GOLD
+//
+// Barème rééquilibré (01/08). L'ancien (30/20/15/6/3) demandait 41 à 45 jours
+// de jeu régulier pour la première fusion d'un commun, d'un peu commun ou d'un
+// rare — et rendait paradoxalement le légendaire DEUX FOIS plus rapide que le
+// commun. Simulation du tirage réel (3 cartes/pack, rareté pondérée puis
+// uniforme) sur une collection de référence de 30 cartes (10/8/6/4/2) :
+//
+//   rareté        seuil   joueur régulier   joueur assidu
+//   commun          12         15 j              7 j
+//   peu commun       9         15 j              7 j
+//   rare             6         14 j              6 j
+//   épique           4         14 j              6 j
+//   légendaire       3         19 j              8 j
+//
+// Les quatre premières raretés convergent volontairement vers ~2 semaines ;
+// le légendaire reste le plus long, c'est la pièce de prestige. Dorer une
+// collection entière demande toujours plusieurs mois, carte par carte.
 const _goldCost = {
-  Rarity.common: 30,
-  Rarity.uncommon: 20,
-  Rarity.rare: 15,
-  Rarity.epic: 6,
+  Rarity.common: 12,
+  Rarity.uncommon: 9,
+  Rarity.rare: 6,
+  Rarity.epic: 4,
   Rarity.legendary: 3,
 };
 
@@ -454,6 +472,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Set<String> _goldIds = {};
   String _sortBy = 'rarity';
   bool _sortAsc = true;
+  // ✨ Filtre « vitrine GOLD » : n'affiche que les cartes dorées
+  bool _goldOnly = false;
   // FIX scroll : état remonté depuis _CardCreator pour bloquer
   // TabBarView (gauche/droite) ET NestedScrollView (haut/bas)
   bool _cardMoveMode = false;
@@ -949,6 +969,36 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     pinned: true,
     backgroundColor: _bg,
     elevation: 0,
+    // 🛠️ Outils de test — n'apparaît JAMAIS en build release.
+    actions: [
+      if (DevTools.enabled)
+        Padding(
+          padding: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
+          child: GestureDetector(
+            onTap:
+                () => DevPanel.show(
+                  context,
+                  collectionId: widget.collection.id,
+                  onChanged: () async {
+                    await _loadCards();
+                    await _loadAdmin();
+                  },
+                ),
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _gold, width: 1.5),
+              ),
+              child: const Center(
+                child: Text('🛠️', style: TextStyle(fontSize: 16)),
+              ),
+            ),
+          ),
+        ),
+    ],
     leading: Padding(
       padding: const EdgeInsets.only(left: 12, top: 8, bottom: 8),
       child: GestureDetector(
@@ -1219,6 +1269,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     final pct = total == 0 ? 0.0 : owned / total;
     final complete = owned == total;
 
+    // ✨ Progression GOLD — sur le même dénominateur que le dex : une case
+    // de dex = une carte à obtenir, puis à dorer.
+    final goldOwned = cat.where((c) => _goldIds.contains(c.id)).length;
+    final goldPct = total == 0 ? 0.0 : goldOwned / total;
+    final goldComplete = total > 0 && goldOwned == total;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 12, 14, 2),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -1273,6 +1329,66 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             ),
           ),
           const SizedBox(height: 10),
+
+          // ✨ SECONDE JAUGE — progression GOLD.
+          // Même case du dex, second palier : le joueur qui termine son dex
+          // découvre qu'il lui reste toutes ses cartes à dorer.
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(top: 10),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: _surfaceLine, width: 1)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      goldComplete ? '👑' : '🥇',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'GOLD',
+                      style: _pixel(
+                        size: 9,
+                        color: _creamFaint,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '$goldOwned / $total',
+                      style: _arcade(
+                        size: 15,
+                        color: goldOwned > 0 ? _gold : _creamFaint,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${(goldPct * 100).round()}%',
+                      style: _pixel(
+                        size: 10,
+                        color: goldOwned > 0 ? _gold : _creamFaint,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: LinearProgressIndicator(
+                    value: goldPct,
+                    minHeight: 9,
+                    backgroundColor: Colors.black.withValues(alpha: 0.35),
+                    valueColor: const AlwaysStoppedAnimation(_gold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           Row(
             children:
                 Rarity.values.reversed
@@ -1396,6 +1512,54 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                   ),
                 );
               }),
+
+              // ✨ FILTRE VITRINE GOLD — n'affiche que les cartes dorées.
+              // Séparé visuellement du tri par une barre verticale : ce n'est
+              // pas un critère de tri mais un filtre.
+              Container(
+                width: 1,
+                height: 22,
+                margin: const EdgeInsets.only(right: 8),
+                color: _surfaceLine,
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => setState(() => _goldOnly = !_goldOnly),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _goldOnly ? _gold : _cream.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(
+                        color: _goldOnly ? Colors.transparent : _gold,
+                        width: 1.5,
+                      ),
+                      boxShadow:
+                          _goldOnly
+                              ? [
+                                BoxShadow(
+                                  color: _gold.withValues(alpha: 0.45),
+                                  blurRadius: 10,
+                                ),
+                              ]
+                              : null,
+                    ),
+                    child: Text(
+                      '🥇 Gold',
+                      style: _body(
+                        size: 12,
+                        color: _goldOnly ? const Color(0xFF2A1C00) : _gold,
+                        weight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1406,7 +1570,48 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
   Widget _cardGrid() {
     final obtIds = _obtainedCards.map((c) => c.id).toSet();
-    final cards = _sorted(_catalogue);
+    // ✨ Filtre vitrine GOLD appliqué avant le tri
+    final source =
+        _goldOnly
+            ? _catalogue.where((c) => _goldIds.contains(c.id)).toList()
+            : _catalogue;
+    final cards = _sorted(source);
+
+    // État vide spécifique à la vitrine : on n'affiche pas « Crée-en dans
+    // l'onglet ✏️ », qui n'aurait aucun sens ici.
+    if (cards.isEmpty && _goldOnly) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '🥇',
+                style: TextStyle(
+                  fontSize: 50,
+                  color: _cream.withValues(alpha: 0.2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Aucune carte GOLD',
+                textAlign: TextAlign.center,
+                style: _arcade(size: 16, color: _creamFaint),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Accumule les doublons d\'une même carte, '
+                'puis fusionne-les pour la dorer.',
+                textAlign: TextAlign.center,
+                style: _body(size: 13, color: _creamFaint),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (cards.isEmpty) {
       return Center(
         child: Column(
@@ -2048,6 +2253,28 @@ class _CardTile extends StatelessWidget {
                     card.imageBytes!,
                     fit: BoxFit.cover,
                     cacheWidth: 400,
+                  ),
+                ),
+
+              // ✨ Voile ambré réservé aux cartes GOLD.
+              // Sans lui, une GOLD et une légendaire sont indiscernables :
+              // les deux partagent déjà la bordure dorée (isLeg).
+              if (isGold)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            _gold.withValues(alpha: 0.34),
+                            const Color(0xFFFFF1B8).withValues(alpha: 0.12),
+                            _gold.withValues(alpha: 0.30),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               Positioned(

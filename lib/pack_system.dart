@@ -43,6 +43,15 @@ class PackSystem {
     await _syncToSupabase(collectionId, now);
   }
 
+  /// ✨ Efface le timer LOCAL de cette collection (outils de test).
+  /// Attention : ne suffit pas à débloquer le pack à lui seul — la date
+  /// serveur doit aussi être effacée, sinon syncFromSupabase la restaure.
+  /// DevTools.resetPackTimer fait les deux.
+  static Future<void> clearTimer(String collectionId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key(collectionId));
+  }
+
   static Future<Duration> timeUntilNextPack(String collectionId) async {
     final last = await _getTime(collectionId);
     if (last == null) return Duration.zero;
