@@ -2062,19 +2062,58 @@ class _PackPreviewState extends State<PackPreview>
 //   WIDGETS DE RENDU POUR L'INSPECTEUR 3D
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class SavedCardFrontWidget extends StatelessWidget {
+class SavedCardFrontWidget extends StatelessWidget
+    implements InspectableCardFace {
   final SavedCard card;
   final double width;
   final double height;
+
+  /// ✨ Mode « plein cadre » : l'illustration occupe la totalité du cadre,
+  /// exactement comme à la révélation du pack. Le nom et la rareté sont
+  /// affichés HORS du cadre par CardInspectorScreen, qui les récupère seul
+  /// via InspectableCardFace (getters `inspector*` plus bas).
+  ///
+  /// ⚠️ Par défaut à TRUE : ce widget ne sert QUE dans l'inspecteur 3D
+  /// (ouverture de pack + détail de collection), et les deux doivent avoir
+  /// le même rendu. Passer false pour retrouver l'ancien affichage.
+  final bool fullBleed;
+
+  /// ✨ Carte fusionnée en GOLD. L'info ne vient pas de SavedCard (qui ne la
+  /// connaît pas) mais de l'écran appelant, qui lit `_goldIds`.
+  final bool isGold;
 
   const SavedCardFrontWidget({
     super.key,
     required this.card,
     this.width = 300,
     this.height = 420,
+    this.fullBleed = true,
+    this.isGold = false,
   });
 
-  Color get _rarityColor {
+  // ── InspectableCardFace ────────────────────────────────────────────────
+  // Permet à l'inspecteur d'afficher rareté + nom hors du cadre sans que
+  // l'écran appelant ait quoi que ce soit à transmettre.
+
+  @override
+  String? get inspectorName => card.name;
+
+  @override
+  String? get inspectorRarityLabel => isGold ? 'Gold' : _rarityName;
+
+  /// Palette arcade (celle de la révélation de pack) pour que la pastille
+  /// soit identique d'un écran à l'autre.
+  @override
+  Color? get inspectorRarityColor =>
+      isGold ? _goldAccent : _rarityColor(card.rarity);
+
+  static const _goldAccent = Color(0xFFFFC83D);
+
+  /// Couleur de la BORDURE et du halo du cadre.
+  /// ⚠️ Renommé (ex-`_rarityColor`) : le nom masquait la fonction globale
+  /// `_rarityColor(Rarity)` de la palette arcade, utilisée ci-dessus.
+  Color get _frameColor {
+    if (isGold) return _goldAccent;
     switch (card.rarity) {
       case Rarity.legendary:
         return const Color(0xFFFFD700);
@@ -2106,7 +2145,99 @@ class SavedCardFrontWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rc = _rarityColor;
+    final rc = _frameColor;
+
+    // ✨ PLEIN CADRE — l'illustration remplit tout le cadre.
+    // Les cartes sont composées au ratio 400×560 (= 1.4), soit celui du
+    // cadre 300×420 : BoxFit.cover ne rogne donc quasiment rien.
+    if (fullBleed) {
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: const Color(0xFF0D0D1C),
+          border: Border.all(color: rc, width: isGold ? 4 : 3),
+          boxShadow: [
+            BoxShadow(
+              color: rc.withValues(alpha: isGold ? 0.75 : 0.6),
+              blurRadius: isGold ? 34 : 28,
+              spreadRadius: isGold ? 6 : 4,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(15),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Fond — visible seulement si l'illustration manque
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      rc.withValues(alpha: 0.18),
+                      const Color(0xFF0D0D1C),
+                    ],
+                  ),
+                ),
+              ),
+              if (card.imageBytes != null)
+                Image.memory(
+                  card.imageBytes!,
+                  fit: BoxFit.cover,
+                  cacheWidth: 900,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+
+              // ✨ Voile ambré GOLD — même traitement que la vignette de la
+              // grille, pour que la carte reste reconnaissable une fois
+              // agrandie.
+              if (isGold)
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          _goldAccent.withValues(alpha: 0.34),
+                          const Color(0xFFFFF1B8).withValues(alpha: 0.12),
+                          _goldAccent.withValues(alpha: 0.30),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Reflet diagonal — c'est lui qui donne le relief quand on
+              // incline la carte en 3D.
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.06),
+                        Colors.transparent,
+                        Colors.white.withValues(alpha: 0.03),
+                        Colors.transparent,
+                        Colors.white.withValues(alpha: 0.07),
+                      ],
+                      stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       width: width,
       height: height,

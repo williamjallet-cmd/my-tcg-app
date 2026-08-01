@@ -2013,6 +2013,9 @@ class _CardTile extends StatelessWidget {
                     card: card,
                     width: 300,
                     height: 420,
+                    // ✨ SavedCard ne connaît pas le statut GOLD : il vient
+                    // de _goldIds, porté ici par la vignette.
+                    isGold: isGold,
                   ),
                   backCard: SavedCardBackWidget(
                     card: card,
