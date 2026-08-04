@@ -14,7 +14,6 @@
 //    mets _kUseGoogleFonts = false et tu retombes sur les polices système.
 // ════════════════════════════════════════════════════════════════════════════
 
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -35,6 +34,7 @@ import 'pack_customizer_screen.dart';
 import 'manage_members_screen.dart';
 import 'streak_service.dart';
 import 'daily_reward_card.dart';
+import 'pack_countdown.dart';
 import 'dev_tools.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -459,9 +459,12 @@ class CollectionDetailScreen extends StatefulWidget {
 class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabCtrl;
-  Duration _remaining = Duration.zero;
-  bool _canOpen = false;
-  Timer? _timer;
+  // ✨ Le décompte vit désormais dans son propre widget (pack_countdown.dart).
+  // Plus aucun setState par seconde sur l'écran entier.
+  final _countdownKey = GlobalKey<PackCountdownState>();
+
+  /// Vrai pendant l'enregistrement du pack (avant l'animation).
+  bool _openingPack = false;
   List<SavedCard> _allCards = [];
   List<SavedCard> _obtainedCards = [];
   Set<String> _catalogueIds = {};
@@ -550,44 +553,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   @override
   void dispose() {
     _tabCtrl.dispose();
-    _timer?.cancel();
     super.dispose();
   }
 
   Future<void> _syncAndLoad() async {
     await PackSystem.syncFromSupabase(widget.collection.id);
-    _startTimer();
+    _countdownKey.currentState?.refresh();
     await _loadCards();
-  }
-
-  void _startTimer() async {
-    final r = await PackSystem.timeUntilNextPack(widget.collection.id);
-    final c = await PackSystem.canOpenPack(widget.collection.id);
-    if (mounted) {
-      setState(() {
-        _remaining = r;
-        _canOpen = c;
-      });
-    }
-    if (!c) {
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) {
-          _timer?.cancel();
-          return;
-        }
-        final next = _remaining - const Duration(seconds: 1);
-        if (next <= Duration.zero) {
-          _timer?.cancel();
-          setState(() {
-            _remaining = Duration.zero;
-            _canOpen = true;
-          });
-        } else {
-          setState(() => _remaining = next);
-        }
-      });
-    }
   }
 
   Future<void> _loadCards() async {
@@ -791,10 +763,42 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       _msg('❌ Crée des cartes dans l\'onglet ✏️ d\'abord !', err: true);
       return;
     }
+    if (_openingPack) return;
     // ✨ Retour haptique : le pack s'ouvre !
     HapticFeedback.mediumImpact();
     final rng = math.Random();
     final packCards = List.generate(3, (_) => _weightedPick(pool, rng));
+
+    // ✅ CORRECTIF MAJEUR : la sauvegarde passe AVANT tout le reste.
+    //
+    // Avant, l'ordre était : cooldown → série → prefs locales → animation,
+    // et la sauvegarde serveur arrivait tout à la fin. Si elle échouait, le
+    // joueur perdait TROIS choses d'un coup : ses cartes, ses 3 h de
+    // cooldown et sa série — alors que ses prefs locales lui affichaient
+    // quand même les cartes, jusqu'à ce que la synchro suivante les efface
+    // sans explication.
+    //
+    // Désormais, tant que le serveur n'a pas confirmé, RIEN n'est consommé :
+    // le joueur peut simplement réappuyer sur le bouton.
+    setState(() => _openingPack = true);
+    try {
+      await CollectionService.instance.saveUserCards(
+        widget.collection.id,
+        packCards,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _openingPack = false);
+        _msg(
+          '❌ Enregistrement impossible. Ton pack n\'a pas été consommé, '
+          'réessaie.',
+          err: true,
+        );
+      }
+      return;
+    }
+    if (mounted) setState(() => _openingPack = false);
+
     await PackSystem.setLastOpenedTime(widget.collection.id);
     final streak = await StreakService.registerPackOpened();
     if (mounted && streak.increasedToday) {
@@ -817,7 +821,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       ({...existing, ..._obtainedCards.map((c) => c.id)}
         ..removeAll(packIds)).toList(),
     );
-    _startTimer();
+    _countdownKey.currentState?.refresh();
     if (!mounted) return;
     await Navigator.push(
       context,
@@ -826,6 +830,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
             (_) => PackOpeningScreen(
               cards: packCards,
               collectionId: _col.id,
+              // Déjà enregistré ci-dessus : l'écran ne fait qu'animer.
+              saveCards: false,
               packName:
                   (_col.packTitle?.isNotEmpty ?? false)
                       ? _col.packTitle!
@@ -842,7 +848,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     // ✨ Retour du pack → onglet Cartes directement (badges NEW visibles)
     if (mounted) _tabCtrl.animateTo(1);
     await _loadCards();
-    _startTimer();
+    _countdownKey.currentState?.refresh();
   }
 
   void _msg(String msg, {bool err = false}) {
@@ -1108,7 +1114,15 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _canOpen ? _openBtn(p) : _timerWidget(),
+        // ✨ Seul CE widget se reconstruit chaque seconde (voir
+        // pack_countdown.dart). La grille de cartes ne bouge plus.
+        PackCountdown(
+          key: _countdownKey,
+          collectionId: widget.collection.id,
+          builder:
+              (_, remaining, canOpen) =>
+                  canOpen ? _openBtn(p) : _timerWidget(remaining),
+        ),
         const SizedBox(height: 16),
         DailyRewardBanner(collection: _col, onClaimed: _loadCards),
         if (_col.isOwnedBy(widget.myUserId)) ...[
@@ -1214,17 +1228,36 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
   Widget _openBtn(List<Color> p) => _ArcadeButton(
     big: true,
     onTap: _openPack,
-    child: const Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(Icons.auto_awesome, size: 22),
-        SizedBox(width: 10),
-        Text('OUVRIR LE PACK'),
-      ],
-    ),
+    child:
+        _openingPack
+            // Court instant d'enregistrement : le pack n'est consommé
+            // qu'une fois le serveur confirmé.
+            ? const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.black87,
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('ENREGISTREMENT…'),
+              ],
+            )
+            : const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.auto_awesome, size: 22),
+                SizedBox(width: 10),
+                Text('OUVRIR LE PACK'),
+              ],
+            ),
   );
 
-  Widget _timerWidget() => Container(
+  Widget _timerWidget(Duration remaining) => Container(
     width: double.infinity,
     padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
     decoration: BoxDecoration(
@@ -1240,7 +1273,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         ),
         const SizedBox(height: 4),
         Text(
-          PackSystem.formatDuration(_remaining),
+          PackSystem.formatDuration(remaining),
           style: _arcade(
             size: 30,
             color: _teal,

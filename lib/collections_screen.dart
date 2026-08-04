@@ -2,13 +2,13 @@
 // RESKIN rétro-arcade premium. Logique inchangée (chargement, timer,
 // navigation, création, suppression, édition, partage).
 
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'card_storage.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
+import 'pack_countdown.dart';
 import 'collection_detail_screen.dart';
 import 'community_screen.dart';
 import 'community_service.dart';
@@ -386,9 +386,7 @@ class _CollectionCard extends StatefulWidget {
 }
 
 class _CollectionCardState extends State<_CollectionCard> {
-  Duration _remaining = Duration.zero;
   bool _canOpen = false;
-  Timer? _timer;
   int _memberCount = 0;
   int _totalCards = 0;
   int _obtainedCards = 0;
@@ -401,7 +399,6 @@ class _CollectionCardState extends State<_CollectionCard> {
 
   Future<void> _refresh() async {
     final results = await Future.wait([
-      PackSystem.timeUntilNextPack(widget.collection.id),
       PackSystem.canOpenPack(widget.collection.id),
       CollectionService.instance.getMemberCount(widget.collection.id),
       CollectionService.instance.getCollectionCardIds(widget.collection.id),
@@ -409,12 +406,11 @@ class _CollectionCardState extends State<_CollectionCard> {
       CardStorage.loadCards(),
     ]);
 
-    final r = results[0] as Duration;
-    final c = results[1] as bool;
-    final members = results[2] as int;
-    final cardIds = results[3] as List<String>;
-    final ownedIds = (results[4] as List<String>).toSet();
-    final localCards = results[5] as List<SavedCard>;
+    final c = results[0] as bool;
+    final members = results[1] as int;
+    final cardIds = results[2] as List<String>;
+    final ownedIds = (results[3] as List<String>).toSet();
+    final localCards = results[4] as List<SavedCard>;
 
     // ✅ RÈGLE COMMUNE avec le DEX : seules les cartes RÉELLES comptent.
     // Une entrée de catalogue orpheline (sans card_data, n'affichant aucune
@@ -427,38 +423,16 @@ class _CollectionCardState extends State<_CollectionCard> {
 
     if (mounted) {
       setState(() {
-        _remaining = r;
         _canOpen = c;
         _memberCount = members;
         _totalCards = total;
         _obtainedCards = obtained;
       });
     }
-    if (!c) {
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) {
-          _timer?.cancel();
-          return;
-        }
-        final next = _remaining - const Duration(seconds: 1);
-        if (next <= Duration.zero) {
-          _timer?.cancel();
-          setState(() {
-            _remaining = Duration.zero;
-            _canOpen = true;
-          });
-        } else {
-          setState(() => _remaining = next);
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
+    // ✨ Plus de Timer ici : le décompte tourne dans PackCountdown, qui ne
+    // reconstruit que son propre texte. Avant, chaque vignette de collection
+    // se redessinait entièrement une fois par seconde — dix collections
+    // affichées = dix reconstructions complètes par seconde.
   }
 
   bool get _isOwner => widget.collection.isOwnedBy(widget.myUserId);
@@ -716,9 +690,17 @@ class _CollectionCardState extends State<_CollectionCard> {
               style: Arcade.pixel(size: 7, color: Arcade.creamFaint),
             ),
             const SizedBox(height: 2),
-            Text(
-              PackSystem.formatDuration(_remaining),
-              style: Arcade.title(size: 14, color: Arcade.teal),
+            // ✨ Seul ce Text se reconstruit chaque seconde.
+            PackCountdown(
+              collectionId: widget.collection.id,
+              onReady: () {
+                if (mounted) setState(() => _canOpen = true);
+              },
+              builder:
+                  (_, remaining, __) => Text(
+                    PackSystem.formatDuration(remaining),
+                    style: Arcade.title(size: 14, color: Arcade.teal),
+                  ),
             ),
           ],
         ),

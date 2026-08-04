@@ -86,7 +86,9 @@ class CardMediaService {
       if (p == null && e.bytes.isNotEmpty) {
         p = await _upload(_extraPath(card.id, i), e.bytes);
       }
-      extras.add(ExtraImage(bytes: e.bytes, x: e.x, y: e.y, scale: e.scale, path: p));
+      extras.add(
+        ExtraImage(bytes: e.bytes, x: e.x, y: e.y, scale: e.scale, path: p),
+      );
     }
 
     return card.copyWith(
@@ -119,7 +121,9 @@ class CardMediaService {
       if (e.path == null) continue; // ni octets ni chemin : rien à faire
       final b = await _download(e.path!);
       if (b != null) {
-        extras.add(ExtraImage(bytes: b, x: e.x, y: e.y, scale: e.scale, path: e.path));
+        extras.add(
+          ExtraImage(bytes: b, x: e.x, y: e.y, scale: e.scale, path: e.path),
+        );
       }
     }
 
@@ -130,10 +134,27 @@ class CardMediaService {
     );
   }
 
-  /// Hydrate plusieurs cartes en parallèle.
-  Future<List<SavedCard>> hydrateAll(List<SavedCard> cards) {
-    if (cards.isEmpty) return Future.value(<SavedCard>[]);
-    return Future.wait(cards.map(hydrate));
+  /// Nombre de cartes hydratées simultanément.
+  /// 6 est un compromis : assez pour saturer une bonne connexion, assez peu
+  /// pour ne pas écrouler un réseau mobile ni faire exploser la mémoire.
+  static const _batchSize = 6;
+
+  /// Hydrate plusieurs cartes, PAR LOTS.
+  ///
+  /// ✅ CORRECTIF : avant, un simple `Future.wait` sur toutes les cartes
+  /// lançait autant de téléchargements simultanés qu'il y a de cartes (plus
+  /// les dos et les extras). En rejoignant une collection de 100 cartes, ça
+  /// déclenchait plusieurs centaines de requêtes d'un coup — timeouts en
+  /// réseau mobile, et tous les octets en RAM au même instant.
+  Future<List<SavedCard>> hydrateAll(List<SavedCard> cards) async {
+    if (cards.isEmpty) return <SavedCard>[];
+    final out = <SavedCard>[];
+    for (var i = 0; i < cards.length; i += _batchSize) {
+      final end =
+          (i + _batchSize < cards.length) ? i + _batchSize : cards.length;
+      out.addAll(await Future.wait(cards.sublist(i, end).map(hydrate)));
+    }
+    return out;
   }
 
   /// Suppression best-effort des images d'une carte sur Storage.

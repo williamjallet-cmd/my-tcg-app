@@ -119,6 +119,15 @@ class PackOpeningScreen extends StatefulWidget {
   final String? packImageUrl;
   final String packSubtitle;
 
+  /// ✨ Faux quand l'appelant a DÉJÀ enregistré les cartes sur le serveur
+  /// avant d'ouvrir cet écran — ce qui est le bon ordre : rien ne doit être
+  /// consommé (cooldown, série, réclamation quotidienne) tant que la
+  /// sauvegarde n'est pas confirmée.
+  ///
+  /// Laissé à true par défaut : un futur appelant qui oublierait le
+  /// paramètre garde un comportement sûr, avec sauvegarde en fin d'écran.
+  final bool saveCards;
+
   const PackOpeningScreen({
     super.key,
     required this.cards,
@@ -128,6 +137,7 @@ class PackOpeningScreen extends StatefulWidget {
     this.packImageBytes,
     this.packImageUrl,
     this.packSubtitle = 'Pack surprise',
+    this.saveCards = true,
   });
 
   @override
@@ -268,6 +278,11 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   }
 
   Future<void> _saveAndReturn() async {
+    // Cartes déjà enregistrées par l'appelant → rien à faire ici.
+    if (!widget.saveCards) {
+      Navigator.pop(context);
+      return;
+    }
     setState(() => _isSaving = true);
     try {
       await CollectionService.instance.saveUserCards(

@@ -100,6 +100,16 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
         return;
       }
 
+      // ✅ CORRECTIF : on enregistre AVANT de consommer la réclamation.
+      // Avant, commitClaim brûlait la récompense du jour et la série, puis
+      // la sauvegarde arrivait à la fin de l'écran d'ouverture : si elle
+      // échouait, le joueur perdait sa carte ET sa journée.
+      // Maintenant, un échec laisse la réclamation intacte : il réessaie.
+      await CollectionService.instance.saveUserCards(
+        widget.collection.id,
+        drawn,
+      );
+
       final result = await DailyRewardService.instance.commitClaim(
         widget.collection.id,
       );
@@ -112,6 +122,8 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
               (_) => PackOpeningScreen(
                 cards: drawn,
                 collectionId: widget.collection.id,
+                // Déjà enregistré ci-dessus.
+                saveCards: false,
                 packName: result.isBooster ? 'BOOSTER BONUS' : 'CARTE DU JOUR',
                 packSubtitle:
                     result.isBooster

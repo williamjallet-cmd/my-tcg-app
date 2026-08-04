@@ -233,6 +233,10 @@ class _CommunityCard extends StatelessWidget {
                         ? Image.network(
                           col.imageUrl!,
                           fit: BoxFit.cover,
+                          // ✅ Sans cacheWidth, une bannière de 2000 px se
+                          // décodait en pleine résolution pour occuper 56 px.
+                          // 168 = 56 × 3 (densité max des écrans visés).
+                          cacheWidth: 168,
                           errorBuilder:
                               (_, __, ___) => Container(color: Arcade.surface2),
                         )
