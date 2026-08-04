@@ -381,19 +381,39 @@ class CollectionService {
     return joinByCode(code);
   }
 
+  /// ✅ CORRECTIF : on repêche aussi les collections dont on est
+  /// PROPRIÉTAIRE, même sans ligne dans `collection_members`.
+  ///
+  /// createCollection insère la collection, puis appelle `_joinAsMember`
+  /// dans un second temps. Si cette seconde requête échouait (coupure
+  /// réseau au mauvais moment), la collection existait bel et bien mais
+  /// disparaissait de la liste de son créateur — définitivement, puisque
+  /// cette liste ne lisait que `collection_members`.
   Future<List<CollectionModel>> getMyCollections() async {
-    final res = await _db
+    final byId = <String, CollectionModel>{};
+
+    final asMember = await _db
         .from('collection_members')
         .select('collections(*)')
         .eq('user_id', _uid);
-    return (res as List)
-        .where((row) => row['collections'] != null)
-        .map(
-          (row) => CollectionModel.fromMap(
-            row['collections'] as Map<String, dynamic>,
-          ),
-        )
-        .toList();
+    for (final row in (asMember as List)) {
+      if (row['collections'] == null) continue;
+      final c = CollectionModel.fromMap(
+        row['collections'] as Map<String, dynamic>,
+      );
+      byId[c.id] = c;
+    }
+
+    final asOwner = await _db
+        .from('collections')
+        .select()
+        .eq('owner_user_id', _uid);
+    for (final row in (asOwner as List)) {
+      final c = CollectionModel.fromMap(row as Map<String, dynamic>);
+      byId[c.id] = c;
+    }
+
+    return byId.values.toList();
   }
 
   Future<void> leaveCollection(String collectionId) async {
@@ -644,10 +664,25 @@ class CollectionService {
     return entries.map((e) => e.toSavedCard()).whereType<SavedCard>().toList();
   }
 
-  /// ✨ Nombre de cartes réellement POSSÉDÉES par l'utilisateur, toutes
-  /// collections confondues. Comptage côté serveur (0 ligne téléchargée).
-  Future<int> getMyOwnedCardCount() async {
+  /// ✨ Nombre de cartes réellement POSSÉDÉES par l'utilisateur.
+  /// Comptage côté serveur (0 ligne téléchargée).
+  ///
+  /// ✅ CORRECTIF : passe [collectionIds] pour ne compter que les
+  /// collections auxquelles le joueur appartient ENCORE.
+  /// `leaveCollection` supprime la ligne de membre mais conserve les cartes
+  /// (volontairement : le joueur retrouve sa progression s'il revient).
+  /// Sans ce filtre, le compteur du profil incluait les cartes de
+  /// collections quittées — un chiffre qui ne pouvait que monter.
+  Future<int> getMyOwnedCardCount({List<String>? collectionIds}) async {
     try {
+      if (collectionIds != null) {
+        if (collectionIds.isEmpty) return 0;
+        return await _db
+            .from('user_collection_cards')
+            .count(CountOption.exact)
+            .eq('user_id', _uid)
+            .inFilter('collection_id', collectionIds);
+      }
       return await _db
           .from('user_collection_cards')
           .count(CountOption.exact)

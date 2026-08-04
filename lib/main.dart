@@ -857,7 +857,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // ✅ FIX : on compte les cartes réellement POSSÉDÉES par le joueur,
     // pas la taille du catalogue. Bonus perf : 1 requête au lieu d'une
     // par collection.
-    final ownedCount = await CollectionService.instance.getMyOwnedCardCount();
+    // ✅ FIX 2 : restreint aux collections encore rejointes — sinon les
+    // cartes des collections quittées gonflaient le compteur à vie.
+    final ownedCount = await CollectionService.instance.getMyOwnedCardCount(
+      collectionIds: collections.map((c) => c.id).toList(),
+    );
 
     if (mounted) {
       setState(() {
@@ -1120,7 +1124,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           hintStyle: _body(color: _creamFaint),
                           errorText: error,
                           errorStyle: _body(size: 12, color: _coral),
-                          helperText: '3 à 20 caractères · lettres, chiffres, _',
+                          helperText:
+                              '3 à 20 caractères · lettres, chiffres, _',
                           helperStyle: _body(size: 11, color: _creamFaint),
                           filled: true,
                           fillColor: _cream.withValues(alpha: 0.06),
@@ -1140,9 +1145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 16),
                       _ArcadeButton(
                         onTap: checking ? null : save,
-                        child: Text(
-                          checking ? 'VÉRIFICATION…' : 'ENREGISTRER',
-                        ),
+                        child: Text(checking ? 'VÉRIFICATION…' : 'ENREGISTRER'),
                       ),
                     ],
                   ),

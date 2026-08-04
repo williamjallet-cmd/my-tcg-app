@@ -57,7 +57,12 @@ class CommunityService {
     try {
       var query = _db.from('collections').select().eq('is_public', true);
       if (search != null && search.trim().isNotEmpty) {
-        query = query.ilike('name', '%${search.trim()}%');
+        // ✅ `%` et `_` sont des jokers SQL : taper « % » affichait TOUTES
+        // les collections publiques. On les retire du terme saisi.
+        // (Pas de souci de virgule ici : `.ilike()` encode sa valeur,
+        // contrairement à l'expression brute d'un `.or()`.)
+        final q = search.trim().replaceAll(RegExp(r'[%_\\]'), '');
+        if (q.isNotEmpty) query = query.ilike('name', '%$q%');
       }
       final res = await query.order('created_at', ascending: false).limit(50);
       final rows = (res as List).cast<Map<String, dynamic>>();

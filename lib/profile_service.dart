@@ -69,11 +69,11 @@ class ProfileService {
   // ── @pseudo : normalisation, validation, disponibilité ────────────────────
 
   /// Forme canonique d'un @pseudo : minuscules, sans @, espaces → _
-  static String normalizeUsername(String raw) =>
-      raw.trim().toLowerCase().replaceAll(RegExp(r'^@+'), '').replaceAll(
-        RegExp(r'\s+'),
-        '_',
-      );
+  static String normalizeUsername(String raw) => raw
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'^@+'), '')
+      .replaceAll(RegExp(r'\s+'), '_');
 
   /// Message d'erreur si le format est invalide, sinon null.
   /// 3-20 caractères, lettres/chiffres/_ uniquement.
@@ -178,15 +178,36 @@ class ProfileService {
     }
   }
 
+  /// Nettoie un terme de recherche avant de l'injecter dans un filtre.
+  ///
+  /// Deux problèmes à neutraliser :
+  ///  • `%` et `_` sont des jokers SQL. Taper « % » renvoyait donc TOUT le
+  ///    monde, et un pseudo contenant « _ » matchait n'importe quel
+  ///    caractère à cette position.
+  ///  • `"` et `\` casseraient la valeur entre guillemets ci-dessous.
+  ///
+  /// La virgule et les parenthèses, elles, sont conservées : elles sont
+  /// protégées par les guillemets du filtre.
+  static String _searchTerm(String raw) =>
+      raw.replaceAll(RegExp(r'[%_\\"]'), '').trim();
+
   Future<List<UserProfile>> searchUsers(String query) async {
     if (query.trim().isEmpty) return [];
     // Le « @ » tapé par l'utilisateur ne fait pas partie du pseudo stocké.
-    final q = query.trim().toLowerCase().replaceAll(RegExp(r'^@+'), '');
+    final q = _searchTerm(
+      query.trim().toLowerCase().replaceAll(RegExp(r'^@+'), ''),
+    );
     if (q.isEmpty) return [];
+    // ✅ CORRECTIF : la valeur est entre GUILLEMETS.
+    // Avant, elle était insérée telle quelle dans l'expression `or(...)`,
+    // que PostgREST découpe sur les virgules de premier niveau. Chercher
+    // « Jean, Marie » produisait donc des conditions incohérentes et la
+    // requête partait en erreur 400 — la recherche semblait cassée dès
+    // qu'un nom contenait une virgule ou une parenthèse.
     final res = await _db
         .from('profiles')
         .select()
-        .or('username.ilike.%$q%,display_name.ilike.%$q%')
+        .or('username.ilike."%$q%",display_name.ilike."%$q%"')
         .neq('id', _myId)
         .limit(20);
     return (res as List).map((r) => UserProfile.fromMap(r)).toList();

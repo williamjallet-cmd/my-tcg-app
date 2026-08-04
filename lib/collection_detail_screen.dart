@@ -932,7 +932,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                     tabs: [
                       const Tab(text: '🎁 Pack'),
                       const Tab(text: '🃏 Cartes'),
-                      Tab(text: _isAdmin ? '🛠️ Admin' : '✏️ Créer'),
+                      Tab(
+                        text:
+                            _isAdmin
+                                ? '🛠️ Admin'
+                                : (_canAddCards ? '✏️ Créer' : '🔒 Créer'),
+                      ),
                     ],
                   ),
                 ),
@@ -952,7 +957,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                             children: [
                               _packTab(p),
                               _cardsTab(),
-                              _isAdmin ? _adminTab(p) : _createTab(p),
+                              _isAdmin
+                                  ? _adminTab(p)
+                                  : (_canAddCards
+                                      ? _createTab(p)
+                                      : _createLockedTab()),
                             ],
                           ),
                 ),
@@ -1754,6 +1763,46 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       _msg('Erreur : $e', err: true);
     }
   }
+
+  /// ✅ CORRECTIF : le réglage « les membres peuvent ajouter des cartes »
+  /// était enregistré en base et modifiable par le propriétaire… mais
+  /// n'était lu NULLE PART. Les membres gardaient l'onglet ✏️ Créer et
+  /// pouvaient ajouter des cartes quoi qu'il arrive : l'interrupteur ne
+  /// faisait littéralement rien.
+  /// Les admins ne sont jamais concernés par la restriction.
+  bool get _canAddCards => _isAdmin || _col.membersCanAddCards;
+
+  /// Onglet affiché à un membre quand le propriétaire a verrouillé l'ajout.
+  Widget _createLockedTab() => Center(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 36),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '🔒',
+            style: TextStyle(
+              fontSize: 52,
+              color: _cream.withValues(alpha: 0.2),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Ajout de cartes verrouillé',
+            textAlign: TextAlign.center,
+            style: _arcade(size: 17, color: _creamDim),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Le propriétaire de cette collection a réservé la création '
+            'de cartes aux administrateurs.',
+            textAlign: TextAlign.center,
+            style: _body(size: 13.5, color: _creamFaint, height: 1.45),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _createTab(List<Color> p) => _CardCreator(
     palette: p,
