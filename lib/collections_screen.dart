@@ -399,7 +399,10 @@ class _CollectionCardState extends State<_CollectionCard> {
 
   Future<void> _refresh() async {
     final results = await Future.wait([
-      PackSystem.canOpenPack(widget.collection.id),
+      PackSystem.canOpenPack(
+        widget.collection.id,
+        cooldownHours: widget.collection.packCooldownHours,
+      ),
       CollectionService.instance.getMemberCount(widget.collection.id),
       CollectionService.instance.getCollectionCardIds(widget.collection.id),
       CollectionService.instance.getMyOwnedCardIds(widget.collection.id),
@@ -693,6 +696,7 @@ class _CollectionCardState extends State<_CollectionCard> {
             // ✨ Seul ce Text se reconstruit chaque seconde.
             PackCountdown(
               collectionId: widget.collection.id,
+              cooldownHours: widget.collection.packCooldownHours,
               onReady: () {
                 if (mounted) setState(() => _canOpen = true);
               },

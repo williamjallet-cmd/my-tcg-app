@@ -596,9 +596,26 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     final qty = <String, int>{..._qtyByCard};
     final gold = <String>{..._goldIds};
     try {
-      final remoteEntries = await CollectionService.instance.loadUserCards(
+      // ✅ PERF : d'abord les métadonnées SEULES (quelques centaines
+      // d'octets), puis le card_data des seules cartes absentes du
+      // téléphone. Avant, le card_data de toutes les cartes possédées
+      // était retéléchargé à chaque appel de _loadCards — c'est-à-dire à
+      // chaque ouverture de pack, création de carte, fusion, etc.
+      final remoteEntries = await CollectionService.instance.loadUserCardMetas(
         widget.collection.id,
       );
+      final missingUserIds = [
+        for (final e in remoteEntries)
+          if (!all.any((c) => c.id == e.cardId)) e.cardId,
+      ];
+      final withData =
+          missingUserIds.isEmpty
+              ? const <UserCardEntry>[]
+              : await CollectionService.instance.loadUserCardsData(
+                widget.collection.id,
+                missingUserIds,
+              );
+      final dataById = {for (final e in withData) e.cardId: e};
       final newCards = <SavedCard>[];
       // ✨ FIX : le serveur fait foi. Les cartes possédées = celles réellement
       // obtenues en pack — fini les cartes « possédées » parce que créées
@@ -613,7 +630,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         final alreadyLocal = all.any((c) => c.id == entry.cardId);
         final alreadyQueued = newCards.any((c) => c.id == entry.cardId);
         if (!alreadyLocal && !alreadyQueued) {
-          final reconstructed = entry.toSavedCard();
+          final reconstructed = dataById[entry.cardId]?.toSavedCard();
           if (reconstructed != null) newCards.add(reconstructed);
         }
       }
@@ -629,13 +646,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     }
 
     try {
-      final catalog = await CollectionService.instance.getCollectionCards(
-        widget.collection.id,
-      );
-      // ✨ FIX : le catalogue local reflète EXACTEMENT le serveur.
-      // Les cartes supprimées de la collection sont purgées du téléphone
-      // (stockage local + listes), donc les compteurs redeviennent justes.
-      final serverIds = catalog.map((e) => e.cardId).toSet();
+      // ✅ PERF : on ne demande que les IDENTIFIANTS du catalogue.
+      // Le card_data (JSON des calques, parfois une image en base64) n'est
+      // réclamé qu'ensuite, pour les seules cartes manquantes.
+      final serverIds =
+          (await CollectionService.instance.getCollectionCardIds(
+            widget.collection.id,
+          )).toSet();
       final removedIds = catIds.difference(serverIds);
       for (final id in removedIds) {
         await CardStorage.deleteCard(id);
@@ -649,10 +666,17 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
 
       // ✨ NOUVEAU : reconstruit les cartes créées par les AUTRES membres
       // (card_data léger du catalogue + images sur Supabase Storage)
+      final missingCatIds = [
+        for (final id in serverIds)
+          if (!all.any((c) => c.id == id)) id,
+      ];
+      final catalog = await CollectionService.instance.getCollectionCardsData(
+        widget.collection.id,
+        missingCatIds,
+      );
       final missing = <SavedCard>[];
       for (final e in catalog) {
         if (e.cardData == null) continue;
-        if (all.any((c) => c.id == e.cardId)) continue;
         if (missing.any((c) => c.id == e.cardId)) continue;
         final rebuilt = e.toSavedCard();
         if (rebuilt != null) missing.add(rebuilt);
@@ -1128,6 +1152,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         PackCountdown(
           key: _countdownKey,
           collectionId: widget.collection.id,
+          cooldownHours: _col.packCooldownHours,
           builder:
               (_, remaining, canOpen) =>
                   canOpen ? _openBtn(p) : _timerWidget(remaining),

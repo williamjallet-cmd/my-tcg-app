@@ -50,6 +50,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'card_layer.dart';
+import 'color_picker_sheet.dart';
 import 'card_model.dart';
 import 'card_inspector_screen.dart';
 import 'card_storage.dart';
@@ -111,6 +112,12 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       (_layers.isNotEmpty && _layers.first.role == LayerRole.background)
           ? _layers.first
           : null;
+
+  /// ✨ Photo dans laquelle la pipette du sélecteur prélève des couleurs.
+  /// C'est l'image du calque de fond — celle que le joueur voit derrière
+  /// sa carte. Null tant qu'aucune image n'a été choisie : la pipette est
+  /// alors simplement masquée.
+  Uint8List? get _sampleBytes => _bgLayer?.bytes;
 
   late AnimationController _effectController;
 
@@ -363,70 +370,16 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
-  void _editStickerColor(CardLayer layer) {
-    showDialog(
-      context: context,
-      builder:
-          (dialogContext) => StatefulBuilder(
-            builder:
-                (dialogContext, setDialogState) => AlertDialog(
-                  backgroundColor: const Color(0xFF16213E),
-                  title: const Text(
-                    'Couleur du sticker',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  content: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children:
-                        [
-                              0xFFFFD700,
-                              0xFFFFFFFF,
-                              0xFF000000,
-                              0xFFE53935,
-                              0xFF1E88E5,
-                              0xFF43A047,
-                              0xFF8E24AA,
-                              0xFFEC407A,
-                              0xFF00BCD4,
-                            ]
-                            .map(
-                              (c) => GestureDetector(
-                                onTap: () {
-                                  setDialogState(() => layer.stickerColor = c);
-                                  setState(() {});
-                                },
-                                child: Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: Color(c),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color:
-                                          layer.stickerColor == c
-                                              ? Colors.white
-                                              : Colors.white24,
-                                      width: layer.stickerColor == c ? 3 : 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      child: const Text(
-                        'OK',
-                        style: TextStyle(color: Color(0xFF6C4AB6)),
-                      ),
-                    ),
-                  ],
-                ),
-          ),
+  /// ✨ Sélecteur complet (teinte / saturation / luminosité / opacité,
+  /// hexadécimal, pipette sur la photo) au lieu des 9 pastilles figées.
+  Future<void> _editStickerColor(CardLayer layer) async {
+    final c = await ColorPickerSheet.show(
+      context,
+      initial: Color(layer.stickerColor),
+      sampleImage: _sampleBytes,
     );
+    if (c == null) return;
+    setState(() => layer.stickerColor = c.toARGB32());
   }
 
   void _moveLayer(int delta) {
@@ -558,43 +511,57 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                           style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children:
-                              [
-                                Colors.white,
-                                Colors.black,
-                                Colors.yellow,
-                                Colors.red,
-                                Colors.blue,
-                                Colors.green,
-                                Colors.orange,
-                                Colors.purple,
-                                Colors.pink,
-                              ].map((c) {
-                                return GestureDetector(
-                                  onTap:
-                                      () => setDialogState(
-                                        () => selectedColor = c,
-                                      ),
-                                  child: Container(
-                                    width: 30,
-                                    height: 30,
-                                    decoration: BoxDecoration(
-                                      color: c,
-                                      shape: BoxShape.circle,
-                                      border:
-                                          selectedColor == c
-                                              ? Border.all(
-                                                color: Colors.white,
-                                                width: 3,
-                                              )
-                                              : null,
+                        // ✨ Palette complète (+ pipette sur la photo)
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: selectedColor,
+                              sampleImage: _sampleBytes,
+                            );
+                            if (c != null) {
+                              setDialogState(() => selectedColor = c);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 28,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: selectedColor,
+                                    borderRadius: BorderRadius.circular(7),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                const Expanded(
+                                  child: Text(
+                                    'Choisir une couleur',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
                                     ),
                                   ),
-                                );
-                              }).toList(),
+                                ),
+                                const Icon(
+                                  Icons.palette_rounded,
+                                  color: Colors.white54,
+                                  size: 19,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                         const SizedBox(height: 16),
                         const Text(
@@ -2217,30 +2184,62 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                     // ✨ Bloc 4 : fond du recto
                     _buildSectionLabel('Fond'),
                     const SizedBox(height: 8),
+                    // ✨ Raccourcis + accès à la palette complète
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
-                      children:
-                          _backColors.map((c) {
-                            return GestureDetector(
-                              onTap: () => setState(() => _frontColor = c),
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Color(c),
-                                  shape: BoxShape.circle,
-                                  border:
-                                      _frontColor == c
-                                          ? Border.all(
-                                            color: Colors.white,
-                                            width: 3,
-                                          )
-                                          : Border.all(color: Colors.white24),
-                                ),
+                      children: [
+                        ..._backColors.map((c) {
+                          return GestureDetector(
+                            onTap: () => setState(() => _frontColor = c),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Color(c),
+                                shape: BoxShape.circle,
+                                border:
+                                    _frontColor == c
+                                        ? Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        )
+                                        : Border.all(color: Colors.white24),
                               ),
+                            ),
+                          );
+                        }),
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: Color(_frontColor),
+                              sampleImage: _sampleBytes,
+                              allowAlpha: false,
                             );
-                          }).toList(),
+                            if (c != null) {
+                              setState(() => _frontColor = c.toARGB32());
+                            }
+                          },
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFFFFC83D),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              color: Color(0xFFFFC83D),
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -2424,30 +2423,62 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   ] else ...[
                     _buildSectionLabel('Couleur de fond'),
                     const SizedBox(height: 12),
+                    // ✨ Raccourcis + accès à la palette complète
                     Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children:
-                          _backColors.map((c) {
-                            return GestureDetector(
-                              onTap: () => setState(() => _backColor = c),
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: Color(c),
-                                  shape: BoxShape.circle,
-                                  border:
-                                      _backColor == c
-                                          ? Border.all(
-                                            color: Colors.white,
-                                            width: 3,
-                                          )
-                                          : Border.all(color: Colors.white24),
-                                ),
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        ..._backColors.map((c) {
+                          return GestureDetector(
+                            onTap: () => setState(() => _backColor = c),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Color(c),
+                                shape: BoxShape.circle,
+                                border:
+                                    _backColor == c
+                                        ? Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        )
+                                        : Border.all(color: Colors.white24),
                               ),
+                            ),
+                          );
+                        }),
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: Color(_backColor),
+                              sampleImage: _sampleBytes,
+                              allowAlpha: false,
                             );
-                          }).toList(),
+                            if (c != null) {
+                              setState(() => _backColor = c.toARGB32());
+                            }
+                          },
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFFFFC83D),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              color: Color(0xFFFFC83D),
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(

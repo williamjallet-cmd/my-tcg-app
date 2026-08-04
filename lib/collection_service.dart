@@ -486,6 +486,29 @@ class CollectionService {
     }
   }
 
+  /// ✅ PERF : `card_data` du catalogue UNIQUEMENT pour les cartes demandées.
+  /// L'ancienne version tirait le card_data des 44 cartes à chaque
+  /// chargement, alors qu'elles sont déjà sur le téléphone.
+  Future<List<CatalogCardEntry>> getCollectionCardsData(
+    String collectionId,
+    List<String> cardIds,
+  ) async {
+    if (cardIds.isEmpty) return [];
+    try {
+      final res = await _db
+          .from('collection_cards')
+          .select('card_id, card_name, card_rarity, card_data')
+          .eq('collection_id', collectionId)
+          .inFilter('card_id', cardIds);
+      return (res as List)
+          .map((r) => CatalogCardEntry.fromMap(r as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      reportError('Chargement du catalogue', e);
+      return [];
+    }
+  }
+
   Future<List<String>> getCollectionCardIds(String collectionId) async {
     try {
       final res = await _db
@@ -641,6 +664,54 @@ class CollectionService {
     } catch (e) {
       reportError('Fusion GOLD', e, level: ErrorLevel.dataLoss);
       return false;
+    }
+  }
+
+  /// ✅ PERF : liste LÉGÈRE des cartes possédées — sans `card_data`.
+  ///
+  /// `card_data` contient tout le JSON des calques, et même l'image en
+  /// base64 pour les cartes dont l'envoi vers Storage avait échoué. Le
+  /// télécharger pour TOUTES les cartes à chaque chargement d'écran
+  /// représentait des centaines de kilo-octets — parfois des mégaoctets —
+  /// alors que les cartes sont déjà sur le téléphone dans 99 % des cas.
+  ///
+  /// Utiliser [loadUserCardsData] pour ne récupérer que ce qui manque.
+  Future<List<UserCardEntry>> loadUserCardMetas(String collectionId) async {
+    try {
+      final res = await _db
+          .from('user_collection_cards')
+          .select(
+            'id, card_id, card_name, card_rarity, quantity, '
+            'obtained_at, is_gold',
+          )
+          .eq('collection_id', collectionId)
+          .eq('user_id', _uid)
+          .order('obtained_at', ascending: false);
+      return (res as List).map((row) => UserCardEntry.fromMap(row)).toList();
+    } catch (e) {
+      reportError('Chargement de tes cartes', e);
+      return [];
+    }
+  }
+
+  /// `card_data` UNIQUEMENT pour les cartes demandées (celles absentes du
+  /// téléphone). Ne fait aucune requête si la liste est vide.
+  Future<List<UserCardEntry>> loadUserCardsData(
+    String collectionId,
+    List<String> cardIds,
+  ) async {
+    if (cardIds.isEmpty) return [];
+    try {
+      final res = await _db
+          .from('user_collection_cards')
+          .select()
+          .eq('collection_id', collectionId)
+          .eq('user_id', _uid)
+          .inFilter('card_id', cardIds);
+      return (res as List).map((row) => UserCardEntry.fromMap(row)).toList();
+    } catch (e) {
+      reportError('Chargement de tes cartes', e);
+      return [];
     }
   }
 

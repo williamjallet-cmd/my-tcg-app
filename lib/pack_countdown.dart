@@ -24,6 +24,10 @@ import 'pack_system.dart';
 class PackCountdown extends StatefulWidget {
   final String collectionId;
 
+  /// Durée du cooldown, déjà connue de l'appelant via CollectionModel.
+  /// Évite deux requêtes réseau à chaque rafraîchissement du décompte.
+  final int cooldownHours;
+
   /// Reconstruit à chaque seconde — garde-le le plus petit possible.
   final Widget Function(BuildContext context, Duration remaining, bool canOpen)
   builder;
@@ -36,6 +40,7 @@ class PackCountdown extends StatefulWidget {
   const PackCountdown({
     super.key,
     required this.collectionId,
+    required this.cooldownHours,
     required this.builder,
     this.onReady,
   });
@@ -67,8 +72,14 @@ class PackCountdownState extends State<PackCountdown> {
   /// Relit l'état réel depuis PackSystem et relance le décompte si besoin.
   /// À appeler après l'ouverture d'un pack ou une synchro serveur.
   Future<void> refresh() async {
-    final r = await PackSystem.timeUntilNextPack(widget.collectionId);
-    final c = await PackSystem.canOpenPack(widget.collectionId);
+    final r = await PackSystem.timeUntilNextPack(
+      widget.collectionId,
+      cooldownHours: widget.cooldownHours,
+    );
+    final c = await PackSystem.canOpenPack(
+      widget.collectionId,
+      cooldownHours: widget.cooldownHours,
+    );
     if (!mounted) return;
     setState(() {
       _remaining = r;

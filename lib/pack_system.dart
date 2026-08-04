@@ -28,10 +28,22 @@ class PackSystem {
 
   // ── API publique ──────────────────────────────────────────────────────────
 
-  static Future<bool> canOpenPack(String collectionId) async {
+  /// [cooldownHours] : valeur DÉJÀ connue de l'appelant (elle est portée par
+  /// CollectionModel.packCooldownHours, chargé avec la collection).
+  ///
+  /// ✅ CORRECTIF PERF : sans ce paramètre, chaque appel déclenchait une
+  /// requête réseau pour relire un simple entier. Comme canOpenPack ET
+  /// timeUntilNextPack l'appelaient toutes les deux, un seul rafraîchissement
+  /// de décompte coûtait DEUX allers-retours — multipliés par le nombre de
+  /// collections affichées dans la liste. C'est ce qui saturait la connexion
+  /// et provoquait les « Failed host lookup ».
+  static Future<bool> canOpenPack(
+    String collectionId, {
+    int? cooldownHours,
+  }) async {
     final last = await _getTime(collectionId);
     if (last == null) return true;
-    final cooldown = await _getCooldown(collectionId);
+    final cooldown = cooldownHours ?? await _getCooldown(collectionId);
     return DateTime.now().toUtc().difference(last).inSeconds >= cooldown * 3600;
   }
 
@@ -52,10 +64,13 @@ class PackSystem {
     await prefs.remove(_key(collectionId));
   }
 
-  static Future<Duration> timeUntilNextPack(String collectionId) async {
+  static Future<Duration> timeUntilNextPack(
+    String collectionId, {
+    int? cooldownHours,
+  }) async {
     final last = await _getTime(collectionId);
     if (last == null) return Duration.zero;
-    final cooldown = await _getCooldown(collectionId);
+    final cooldown = cooldownHours ?? await _getCooldown(collectionId);
     final next = last.add(Duration(hours: cooldown));
     final diff = next.difference(DateTime.now().toUtc());
     return diff.isNegative ? Duration.zero : diff;
@@ -114,7 +129,14 @@ class PackSystem {
     return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
   }
 
+  /// Repli réseau, utilisé uniquement si l'appelant ne connaît pas la valeur.
+  /// Le résultat est mémorisé : la durée de cooldown d'une collection ne
+  /// change qu'à la main, dans les réglages du propriétaire.
+  static final Map<String, int> _cooldownCache = {};
+
   static Future<int> _getCooldown(String collectionId) async {
+    final cached = _cooldownCache[collectionId];
+    if (cached != null) return cached;
     try {
       final res =
           await Supabase.instance.client
@@ -122,7 +144,9 @@ class PackSystem {
               .select('pack_cooldown_hours')
               .eq('id', collectionId)
               .maybeSingle();
-      return (res?['pack_cooldown_hours'] as int?) ?? _defaultCooldown;
+      final v = (res?['pack_cooldown_hours'] as int?) ?? _defaultCooldown;
+      _cooldownCache[collectionId] = v;
+      return v;
     } catch (e) {
       // Repli sur 3h : sans signalement, un cooldown personnalisé ignoré
       // passait pour un bug de l'app.

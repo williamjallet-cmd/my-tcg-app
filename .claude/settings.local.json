@@ -19,7 +19,8 @@
       "Bash(grep -rn \"catch \\(_\\) *{ *}\\\\|catch \\(_\\) {$\" lib/)",
       "Bash(flutter test *)",
       "Bash(python -)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(flutter devices *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"
