@@ -129,6 +129,49 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   double _gestureStartScale = 1.0;
   double _gestureStartRotation = 0.0;
 
+  // ── Aimantation ────────────────────────────────────────────────────────
+  // Repères affichés pendant le déplacement (null = aucun).
+  double? _guideX;
+  double? _guideY;
+
+  /// Distance sous laquelle l'élément se cale, en pixels de la carte.
+  static const double _snapDist = 5;
+
+  /// Aimante l'élément déplacé sur la marge gauche, le centre de la carte,
+  /// ou l'alignement d'un AUTRE élément.
+  ///
+  /// Placer proprement des textes au doigt est sinon très pénible : sans
+  /// aimantation, deux attaques ne sont jamais alignées au pixel près.
+  void _snapLayer(CardLayer moving) {
+    _guideX = null;
+    _guideY = null;
+
+    // Cibles horizontales : marge gauche, centre, puis les autres couches.
+    final xTargets = <double>[12, _kCardW / 2];
+    final yTargets = <double>[_kCardH / 2];
+    for (final o in _layers) {
+      if (identical(o, moving) || !o.visible) continue;
+      if (o.role == LayerRole.background) continue;
+      xTargets.add(o.x);
+      yTargets.add(o.y);
+    }
+
+    for (final t in xTargets) {
+      if ((moving.x - t).abs() <= _snapDist) {
+        moving.x = t;
+        _guideX = t;
+        break;
+      }
+    }
+    for (final t in yTargets) {
+      if ((moving.y - t).abs() <= _snapDist) {
+        moving.y = t;
+        _guideY = t;
+        break;
+      }
+    }
+  }
+
   bool _showBack = false;
   int _backColor = 0xFF16213E;
   Uint8List? _backImageBytes;
@@ -1333,11 +1376,17 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 l.scale = (_gestureStartScale * d.scale).clamp(0.2, 4.0);
                 // ✨ rotation à deux doigts (radians → degrés)
                 l.rotation = _gestureStartRotation + d.rotation * 180 / pi;
+              } else {
+                _snapLayer(l); // aimantation + repères d'alignement
               }
             }),
-        // Pas de degel ici : l'element reste selectionne, donc deplacable
-        // autant de fois qu'on veut. Le degel a lieu a la deselection
-        // (appui hors de la carte).
+        onScaleEnd: (_) => setState(() {
+          _guideX = null;
+          _guideY = null;
+        }),
+        // Pas de degel du parent ici : l'element reste selectionne, donc
+        // deplacable autant de fois qu'on veut. Le degel a lieu a la
+        // deselection (appui hors de la carte).
         child: Transform.rotate(
           angle: l.rotation * pi / 180,
           child: Transform(
@@ -1391,6 +1440,32 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             ),
             // Couches, dans l'ordre d'empilement
             for (int i = 0; i < _layers.length; i++) _buildLayer(i),
+            // Repères d'alignement — visibles uniquement pendant un
+            // déplacement aimanté. IgnorePointer : purement indicatifs.
+            if (_guideX != null)
+              Positioned(
+                left: _guideX! - 0.5,
+                top: 0,
+                bottom: 0,
+                child: const IgnorePointer(
+                  child: SizedBox(
+                    width: 1,
+                    child: ColoredBox(color: Color(0xCC21E6C1)),
+                  ),
+                ),
+              ),
+            if (_guideY != null)
+              Positioned(
+                top: _guideY! - 0.5,
+                left: 0,
+                right: 0,
+                child: const IgnorePointer(
+                  child: SizedBox(
+                    height: 1,
+                    child: ColoredBox(color: Color(0xCC21E6C1)),
+                  ),
+                ),
+              ),
             if (_effect == CardEffect.holographic) _buildHolographicEffect(),
             if (_effect == CardEffect.shiny) _buildShinyEffect(),
             // ✨ Bloc 4 : cadre décoratif par-dessus tout
@@ -2204,13 +2279,16 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
 
   List<Widget> _buildGameSection() => [
     _buildSectionLabel('Jeu'),
+    // ⚠️ Comme les autres sections, le contenu suit l'accordéon. Sans ce
+    // test, appuyer sur « JEU » fermait les autres sections mais laissait
+    // celle-ci ouverte en permanence.
+    if (_openSection == 'Jeu') ...[
     const SizedBox(height: 4),
     const Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        'Facultatif. « Appliquer le modèle » place ces informations sur la '
-        'carte ; elles restent ensuite déplaçables comme n\'importe quel '
-        'élément.',
+        'Facultatif. Ce que tu saisis apparaît aussitôt sur la carte, et '
+        'reste déplaçable comme n\'importe quel élément.',
         style: TextStyle(color: Colors.white38, fontSize: 11.5),
       ),
     ),
@@ -2325,6 +2403,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         ),
       ),
     ),
+    ], // fin de la section « Jeu » repliable
   ];
 
   Widget _attackEditor(int i) {
