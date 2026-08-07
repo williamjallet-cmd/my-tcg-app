@@ -26,7 +26,8 @@
       "Bash(python -m py_compile add_to_catalogue.py migrate_v1_to_v2.py)",
       "Bash(nslookup wmdtcjiitbkskvumzbdj.supabase.co)",
       "Bash(awk 'NR>=69 && NR<=2503' lib/card_creator_screen.dart)",
-      "Bash(sort -t: -k2 -rn)"
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(git rm *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"
