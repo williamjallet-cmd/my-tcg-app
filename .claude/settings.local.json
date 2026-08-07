@@ -32,7 +32,8 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.oreateai.com)",
-      "Bash(awk 'NR>=2510 && NR<=2530' lib/card_creator_screen.dart)"
+      "Bash(awk 'NR>=2510 && NR<=2530' lib/card_creator_screen.dart)",
+      "Bash(awk 'NR>=2723 && NR<=3300' lib/card_creator_screen.dart)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"

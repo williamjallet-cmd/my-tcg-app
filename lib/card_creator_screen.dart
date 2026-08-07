@@ -2416,6 +2416,23 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   // raccourcis, au lieu de faire défiler à l'aveugle.
   final Map<String, GlobalKey> _sectionKeys = {};
 
+  /// Section actuellement dépliée — une seule à la fois (accordéon).
+  ///
+  /// Le panneau enchaînait 6 sections dépliées en permanence : atteindre
+  /// « Cadre » demandait de faire défiler des centaines de pixels de
+  /// réglages inutiles. En accordéon, tout tient sur un écran.
+  /// `null` = tout replié.
+  String? _openSection = 'Rareté';
+
+  void _toggleSection(String label) {
+    setState(() => _openSection = _openSection == label ? null : label);
+    // Replier une section au-dessus fait « remonter » celle qu'on ouvre :
+    // on la ramène en vue une fois la nouvelle disposition calculée.
+    if (_openSection == label) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToSection(label));
+    }
+  }
+
   GlobalKey _keyFor(String label) =>
       _sectionKeys.putIfAbsent(label, () => GlobalKey());
 
@@ -2444,54 +2461,93 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         scrollDirection: Axis.horizontal,
         itemCount: labels.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
-        itemBuilder:
-            (_, i) => GestureDetector(
-              onTap: () => _jumpToSection(labels[i]),
-              child: Container(
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 13),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF16213E),
-                  borderRadius: BorderRadius.circular(17),
-                  border: Border.all(color: Colors.white24),
+        itemBuilder: (_, i) {
+          final active = _openSection == labels[i];
+          return GestureDetector(
+            // Ouvre la section ET y défile : un raccourci qui se contenterait
+            // de défiler vers une section repliée ne montrerait rien.
+            onTap: () {
+              if (!active) _toggleSection(labels[i]);
+            },
+            child: Container(
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 13),
+              decoration: BoxDecoration(
+                color:
+                    active
+                        ? const Color(0xFF6C4AB6)
+                        : const Color(0xFF16213E),
+                borderRadius: BorderRadius.circular(17),
+                border: Border.all(
+                  color: active ? const Color(0xFF9B7BE0) : Colors.white24,
                 ),
-                child: Text(
-                  labels[i],
-                  style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+              ),
+              child: Text(
+                labels[i],
+                style: TextStyle(
+                  color: active ? Colors.white : Colors.white70,
+                  fontSize: 12.5,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
             ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildSectionLabel(String label) => Padding(
-    key: _keyFor(label),
-    padding: const EdgeInsets.only(bottom: 2),
-    child: Row(
-      children: [
-        // Liseré coloré : repère visuel fort pour découper le long panneau.
-        Container(
-          width: 3,
-          height: 16,
-          decoration: BoxDecoration(
-            color: const Color(0xFF6C4AB6),
-            borderRadius: BorderRadius.circular(2),
+  Widget _buildSectionLabel(String label) {
+    final open = _openSection == label;
+    return GestureDetector(
+      key: _keyFor(label),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _toggleSection(label),
+      child: Container(
+        // Barre pleine largeur : toute la ligne est cliquable, pas seulement
+        // le texte — bien plus facile à viser au doigt.
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+        decoration: BoxDecoration(
+          color: open ? const Color(0xFF241C3A) : const Color(0xFF16213E),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: open ? const Color(0xFF6C4AB6) : Colors.white12,
+            width: open ? 1.5 : 1,
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.6,
-          ),
+        child: Row(
+          children: [
+            Container(
+              width: 3,
+              height: 16,
+              decoration: BoxDecoration(
+                color: open ? const Color(0xFF9B7BE0) : Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  color: open ? Colors.white : Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ),
+            Icon(
+              open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+              color: open ? const Color(0xFF9B7BE0) : Colors.white38,
+              size: 22,
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   // ────────────────────────────────────────────────────────
   //   SAUVEGARDE
@@ -2752,6 +2808,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                     ),
                     const SizedBox(height: 16),
                     _buildSectionLabel('Rareté'),
+                    if (_openSection == 'Rareté') ...[
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -2802,8 +2859,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                             );
                           }).toList(),
                     ),
+                    ],
                     const SizedBox(height: 16),
                     _buildSectionLabel('Effet'),
+                    if (_openSection == 'Effet') ...[
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -2843,6 +2902,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                             );
                           }).toList(),
                     ),
+                    ],
                     const SizedBox(height: 24),
                     Row(
                       children: [
@@ -2897,6 +2957,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                     const SizedBox(height: 24),
                     // ✨ Bloc 4 : fond du recto
                     _buildSectionLabel('Fond'),
+                    if (_openSection == 'Fond') ...[
                     const SizedBox(height: 8),
                     // ✨ Raccourcis + accès à la palette complète
                     Wrap(
@@ -3086,9 +3147,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ],
                       ),
                     ],
+                    ],
                     const SizedBox(height: 16),
                     // ✨ Bloc 4 : cadre décoratif
                     _buildSectionLabel('Cadre'),
+                    if (_openSection == 'Cadre') ...[
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -3134,8 +3197,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                             );
                           }).toList(),
                     ),
+                    ],
                   ] else ...[
                     _buildSectionLabel('Couleur de fond'),
+                    if (_openSection == 'Couleur de fond') ...[
                     const SizedBox(height: 12),
                     // ✨ Raccourcis + accès à la palette complète
                     Wrap(
@@ -3194,6 +3259,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ),
                       ],
                     ),
+                    ],
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
                       onPressed: () => _pickImage(isBack: true),
