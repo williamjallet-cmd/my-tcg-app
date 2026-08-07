@@ -102,6 +102,45 @@ class CardLayer {
   bool get isDeletable => role == LayerRole.normal;
 
   /// Copie profonde, décalée de 12 px (pour « Dupliquer »).
+  /// Copie EXACTE — même id, même rôle, même position.
+  ///
+  /// Sert aux instantanés d'annulation. À ne pas confondre avec [clone],
+  /// qui fabrique un DOUBLON destiné à coexister (nouvel id, décalé).
+  /// Les octets d'image sont partagés et non recopiés : ils ne sont jamais
+  /// modifiés en place, et les dupliquer ferait exploser la mémoire.
+  CardLayer snapshot() => CardLayer(
+    id: id,
+    type: type,
+    role: role,
+    x: x,
+    y: y,
+    scale: scale,
+    rotation: rotation,
+    flipH: flipH,
+    flipV: flipV,
+    opacity: opacity,
+    visible: visible,
+    bytes: bytes,
+    storagePath: storagePath,
+    bgFit: bgFit,
+    bgDarken: bgDarken,
+    text: text,
+    fontSize: fontSize,
+    color: color,
+    fontFamily: fontFamily,
+    bold: bold,
+    italic: italic,
+    outlineColor: outlineColor,
+    outlineWidth: outlineWidth,
+    shadowOn: shadowOn,
+    shadowDx: shadowDx,
+    shadowDy: shadowDy,
+    shadowBlur: shadowBlur,
+    shadowColor: shadowColor,
+    stickerIcon: stickerIcon,
+    stickerColor: stickerColor,
+  );
+
   CardLayer clone() => CardLayer(
     id: newId(),
     type: type,

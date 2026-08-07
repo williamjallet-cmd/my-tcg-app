@@ -129,6 +129,55 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   double _gestureStartScale = 1.0;
   double _gestureStartRotation = 0.0;
 
+  // ── Annuler / Refaire ──────────────────────────────────────────────────
+  // Chaque entrée est un instantané complet de la pile de couches. Les
+  // octets d'image sont partagés (voir CardLayer.snapshot), donc une
+  // entrée ne coûte que quelques centaines d'octets.
+  final List<List<CardLayer>> _undoStack = [];
+  final List<List<CardLayer>> _redoStack = [];
+  static const int _undoLimit = 40;
+
+  bool get _canUndo => _undoStack.isNotEmpty;
+  bool get _canRedo => _redoStack.isNotEmpty;
+
+  List<CardLayer> _snapshotLayers() =>
+      _layers.map((l) => l.snapshot()).toList();
+
+  /// À appeler AVANT toute modification que l'on veut pouvoir annuler.
+  ///
+  /// Volontairement absent des glissements image par image : on empile une
+  /// seule fois au début du geste (onScaleStart), sinon un simple
+  /// déplacement remplirait la pile de dizaines d'entrées inutiles.
+  void _pushUndo() {
+    _undoStack.add(_snapshotLayers());
+    if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
+    _redoStack.clear(); // une nouvelle action invalide le futur
+  }
+
+  void _undo() {
+    if (!_canUndo) return;
+    setState(() {
+      _redoStack.add(_snapshotLayers());
+      final prev = _undoStack.removeLast();
+      _layers
+        ..clear()
+        ..addAll(prev);
+      _selected = -1;
+    });
+  }
+
+  void _redo() {
+    if (!_canRedo) return;
+    setState(() {
+      _undoStack.add(_snapshotLayers());
+      final next = _redoStack.removeLast();
+      _layers
+        ..clear()
+        ..addAll(next);
+      _selected = -1;
+    });
+  }
+
   // ── Aimantation ────────────────────────────────────────────────────────
   // Repères affichés pendant le déplacement (null = aucun).
   double? _guideX;
@@ -305,6 +354,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   // Insère une nouvelle couche juste sous le nom/la rareté
   // (= au-dessus de tout le reste) et la sélectionne.
   void _insertLayer(CardLayer layer) {
+    _pushUndo();
     final insertAt = _layers.indexWhere(
       (l) => l.role == LayerRole.cardName || l.role == LayerRole.cardRarity,
     );
@@ -484,6 +534,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     // Le fond reste verrouillé tout en bas : rien ne passe dessous
     final minIndex = _bgLayer != null ? 1 : 0;
     if (i < minIndex || j < minIndex || j >= _layers.length) return;
+    _pushUndo();
     setState(() {
       final l = _layers.removeAt(i);
       _layers.insert(j, l);
@@ -494,6 +545,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   void _duplicateSelected() {
     final l = _sel;
     if (l == null || !l.isDeletable) return;
+    _pushUndo();
     setState(() {
       final copy = l.clone();
       _layers.insert(_selected + 1, copy);
@@ -504,6 +556,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   void _deleteSelected() {
     final l = _sel;
     if (l == null || !l.isDeletable) return;
+    _pushUndo();
     setState(() {
       _layers.removeAt(_selected);
       _selected = -1;
@@ -993,6 +1046,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                     if (!isName)
                       TextButton(
                         onPressed: () {
+                          _pushUndo();
                           setState(() {
                             _layers.remove(layer);
                             _selected = -1;
@@ -1363,6 +1417,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         },
         // 🐛 Fix pinch : on mémorise l'état de départ du geste
         onScaleStart: (_) {
+          // Un seul instantane par geste, pas un par image d'animation.
+          _pushUndo();
           // Le gel du parent est declenche par l'accesseur _selected.
           setState(() => _selected = i);
           _gestureStartScale = l.scale;
@@ -1612,6 +1668,18 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Centrage horizontal : viser le milieu au doigt est illusoire,
+              // un appui le fait au pixel près. La largeur réelle du texte
+              // n'étant pas connue ici, on centre son point d'ancrage — ce
+              // que l'aimantation propose déjà comme repère.
+              _pillButton(Icons.align_horizontal_center, () {
+                _pushUndo();
+                setState(() => l.x = _kCardW / 2);
+              }),
+              _pillButton(Icons.align_vertical_center, () {
+                _pushUndo();
+                setState(() => l.y = _kCardH / 2);
+              }),
               _pillButton(Icons.flip, () => setState(() => l.flipH = !l.flipH)),
               RotatedBox(
                 quarterTurns: 1,
@@ -2747,6 +2815,22 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           style: const TextStyle(color: Colors.white),
         ),
         actions: [
+          // Annuler / Refaire — grisés quand il n'y a rien à faire, pour
+          // que l'état soit lisible d'un coup d'œil.
+          IconButton(
+            onPressed: _canUndo ? _undo : null,
+            icon: const Icon(Icons.undo_rounded),
+            color: Colors.white70,
+            disabledColor: Colors.white24,
+            tooltip: 'Annuler',
+          ),
+          IconButton(
+            onPressed: _canRedo ? _redo : null,
+            icon: const Icon(Icons.redo_rounded),
+            color: Colors.white70,
+            disabledColor: Colors.white24,
+            tooltip: 'Refaire',
+          ),
           IconButton(
             onPressed: _showBack ? null : _openLayersPanel,
             icon: const Icon(Icons.layers, color: Colors.white70),
@@ -2848,7 +2932,15 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           ),
 
           // Canvas — hors du scroll (drag OK sur mobile)
-          Center(child: _showBack ? _buildCardBack() : _buildCardFront()),
+          // RepaintBoundary : pendant un déplacement, setState est appelé à
+          // chaque image. Sans cette isolation, tout l'écran (panneau de
+          // réglages compris) était REPEINT 60 fois par seconde. Ici, seule
+          // la carte l'est.
+          Center(
+            child: RepaintBoundary(
+              child: _showBack ? _buildCardBack() : _buildCardFront(),
+            ),
+          ),
 
           // ✨ Pilule + sliders de l'élément sélectionné
           if (!_showBack) _buildSelectionTools(),
