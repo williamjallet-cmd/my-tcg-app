@@ -311,9 +311,14 @@ class _CardInspectorScreenState extends State<CardInspectorScreen>
                       Icons.center_focus_strong,
                       color: Colors.white54,
                     ),
-                    label: const Text(
+                    // Police de l'app (lilitaOne), comme le reste des boutons.
+                    label: Text(
                       'Centrer',
-                      style: TextStyle(color: Colors.white54),
+                      style: GoogleFonts.lilitaOne(
+                        color: Colors.white54,
+                        fontSize: 15.5,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.white24),
@@ -327,21 +332,24 @@ class _CardInspectorScreenState extends State<CardInspectorScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   flex: 2,
-                  child: ElevatedButton.icon(
+                  // ElevatedButton simple (et non .icon) : l'ancienne icône
+                  // Icons.flip s'affichait comme un carré blanc barré, en
+                  // doublon avec l'emoji 🔄 déjà présent dans le libellé.
+                  child: ElevatedButton(
                     onPressed: _flip,
-                    icon: const Icon(Icons.flip, color: Colors.white),
-                    label: Text(
-                      _isFlipped ? '👁 Voir le recto' : '🔄 Retourner la carte',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF6C4AB6),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      _isFlipped ? '👁 Voir le recto' : '🔄 Retourner la carte',
+                      style: GoogleFonts.lilitaOne(
+                        color: Colors.white,
+                        fontSize: 15.5,
+                        letterSpacing: 0.5,
                       ),
                     ),
                   ),
