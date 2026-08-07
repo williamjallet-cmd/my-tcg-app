@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
 # add_to_catalogue.py - Ajoute les cartes V1 au catalogue de la collection V2
+#
+# ############################################################################
+# ⚠️  NE PLUS UTILISER — REMPLACE PAR migrate_v1_to_v2.py
+#
+# Deux defauts, corriges dans migrate_v1_to_v2.py :
+#
+#   1. N'envoie PAS card_data. Le catalogue ne contient alors que le nom et
+#      la rarete : les AUTRES membres de la collection ne peuvent pas
+#      reconstruire les cartes et voient une collection vide. Le
+#      proprietaire ne s'en apercoit pas, son app reconstruisant les cartes
+#      depuis ses propres lignes user_collection_cards.
+#
+#   2. Ne filtre PAS par proprietaire (pas de V1_OWNER) : importe TOUTES les
+#      cartes de la V1, y compris celles qui ne t'appartiennent pas.
+#
+# migrate_v1_to_v2.py fait desormais les deux insertions correctement
+# (user_collection_cards ET collection_cards, avec card_data).
+# Ce fichier n'est conserve que pour reference.
+# ############################################################################
 
 import os
 import sys

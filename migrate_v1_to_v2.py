@@ -170,6 +170,12 @@ for card in to_migrate:
         request(V2_URL + "/rest/v1/user_collection_cards", V2_HEADERS, "POST", row)
         # Copie vers le catalogue admin aussi, sauf si deja cataloguee
         # (ex. par add_to_catalogue.py) pour ne jamais creer de doublon.
+        #
+        # ⚠️ card_data est INDISPENSABLE ici : le catalogue est la seule
+        # source dont disposent les AUTRES membres pour reconstruire la
+        # carte. Sans lui, ils voient une collection vide — le proprietaire
+        # ne s'en apercoit pas, car son app reconstruit les cartes depuis
+        # ses propres lignes user_collection_cards.
         if cid not in catalog_ids:
             try:
                 request(V2_URL + "/rest/v1/collection_cards", V2_HEADERS, "POST", {
@@ -177,6 +183,7 @@ for card in to_migrate:
                     "card_id": cid,
                     "card_name": name,
                     "card_rarity": rarity,
+                    "card_data": card_data,
                     "added_by": USER_ID,
                 })
                 catalog_ids.add(cid)
