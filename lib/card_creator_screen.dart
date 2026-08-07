@@ -1317,7 +1317,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       case LayerType.image:
         content =
             l.bytes != null
-                ? Image.memory(l.bytes!, width: _kCardW, cacheWidth: 800)
+                ? Image.memory(
+                  l.bytes!,
+                  width: _kCardW,
+                  // La carte fait 274 px de large : decoder a 800 px gaspille
+                  // ~3x la memoire pour un detail invisible. 560 = 2x, ce qui
+                  // reste net sur les ecrans haute densite.
+                  cacheWidth: 560,
+                )
                 : const SizedBox(width: 60, height: 60);
       case LayerType.text:
         if (l.role == LayerRole.cardName) {
@@ -1384,11 +1391,38 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 Image.memory(
                   l.bytes!,
                   fit: l.bgFit == 1 ? BoxFit.contain : BoxFit.cover,
-                  cacheWidth: 800,
+                  cacheWidth: 560,
                 ),
               if (l.bgDarken > 0)
                 Container(color: Colors.black.withValues(alpha: l.bgDarken)),
             ],
+          ),
+        ),
+      );
+    }
+
+    // Verrouillée : rendue normalement, mais transparente au doigt. Les
+    // appuis traversent jusqu'à la couche du dessous — c'est tout l'intérêt :
+    // figer un élément déjà placé pour travailler par-dessus.
+    if (l.locked) {
+      return Positioned(
+        left: l.x,
+        top: l.y,
+        child: IgnorePointer(
+          child: Transform.rotate(
+            angle: l.rotation * pi / 180,
+            child: Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.diagonal3Values(
+                (l.flipH ? -1.0 : 1.0) * l.scale,
+                (l.flipV ? -1.0 : 1.0) * l.scale,
+                1.0,
+              ),
+              child: Opacity(
+                opacity: l.opacity.clamp(0.05, 1.0),
+                child: _layerContent(l, selected: false),
+              ),
+            ),
           ),
         ),
       );
@@ -1679,6 +1713,15 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
               _pillButton(Icons.align_vertical_center, () {
                 _pushUndo();
                 setState(() => l.y = _kCardH / 2);
+              }),
+              // Verrou : une fois la photo cadrée, on la fige pour travailler
+              // les textes par-dessus sans la bouger par mégarde.
+              _pillButton(Icons.lock_open_rounded, () {
+                _pushUndo();
+                setState(() {
+                  l.locked = true;
+                  _selected = -1; // plus rien à manipuler
+                });
               }),
               _pillButton(Icons.flip, () => setState(() => l.flipH = !l.flipH)),
               RotatedBox(
@@ -2025,6 +2068,30 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                                             color: Colors.white30,
                                           ),
                                         ),
+                                      // ⚠️ SEUL endroit pour déverrouiller :
+                                      // une couche verrouillée ne répond plus
+                                      // au doigt sur la carte.
+                                      IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        tooltip:
+                                            l.locked
+                                                ? 'Déverrouiller'
+                                                : 'Verrouiller',
+                                        onPressed:
+                                            () => refresh(
+                                              () => l.locked = !l.locked,
+                                            ),
+                                        icon: Icon(
+                                          l.locked
+                                              ? Icons.lock_rounded
+                                              : Icons.lock_open_rounded,
+                                          size: 19,
+                                          color:
+                                              l.locked
+                                                  ? const Color(0xFFFFC83D)
+                                                  : Colors.white30,
+                                        ),
+                                      ),
                                       IconButton(
                                         visualDensity: VisualDensity.compact,
                                         onPressed:

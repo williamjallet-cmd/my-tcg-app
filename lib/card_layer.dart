@@ -38,6 +38,11 @@ class CardLayer {
   double opacity;
   bool visible;
 
+  /// Verrouillee : l'element reste visible mais ne repond plus au doigt.
+  /// Sert a figer une photo de fond une fois cadree, pour travailler les
+  /// textes par-dessus sans la deplacer par megarde.
+  bool locked;
+
   // ── Image ─────────────────────────────────────────────────
   Uint8List? bytes;
   String? storagePath; // chemin Supabase Storage (null = pas encore uploadé)
@@ -74,6 +79,7 @@ class CardLayer {
     this.flipV = false,
     this.opacity = 1.0,
     this.visible = true,
+    this.locked = false,
     this.bytes,
     this.storagePath,
     this.bgFit = 0,
@@ -101,7 +107,6 @@ class CardLayer {
 
   bool get isDeletable => role == LayerRole.normal;
 
-  /// Copie profonde, décalée de 12 px (pour « Dupliquer »).
   /// Copie EXACTE — même id, même rôle, même position.
   ///
   /// Sert aux instantanés d'annulation. À ne pas confondre avec [clone],
@@ -120,6 +125,7 @@ class CardLayer {
     flipV: flipV,
     opacity: opacity,
     visible: visible,
+    locked: locked,
     bytes: bytes,
     storagePath: storagePath,
     bgFit: bgFit,
@@ -141,6 +147,8 @@ class CardLayer {
     stickerColor: stickerColor,
   );
 
+  /// Copie profonde décalée de 12 px, destinée à COEXISTER avec l'originale
+  /// (bouton « Dupliquer ») : nouvel id, rôle neutralisé.
   CardLayer clone() => CardLayer(
     id: newId(),
     type: type,
@@ -153,6 +161,7 @@ class CardLayer {
     flipV: flipV,
     opacity: opacity,
     visible: visible,
+    locked: locked,
     bytes: bytes,
     storagePath: storagePath,
     bgFit: bgFit,
@@ -192,6 +201,7 @@ class CardLayer {
     'flipV': flipV,
     'opacity': opacity,
     'visible': visible,
+    'locked': locked,
     'storagePath': storagePath,
     'bgFit': bgFit,
     'bgDarken': bgDarken,
@@ -228,6 +238,7 @@ class CardLayer {
     flipV: (j['flipV'] as bool?) ?? false,
     opacity: (j['opacity'] as num?)?.toDouble() ?? 1.0,
     visible: (j['visible'] as bool?) ?? true,
+    locked: (j['locked'] as bool?) ?? false,
     bytes: j['bytes'] != null ? base64Decode(j['bytes'] as String) : null,
     storagePath: j['storagePath'] as String?,
     bgFit: (j['bgFit'] as int?) ?? 0,
