@@ -1958,23 +1958,33 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       }
       return;
     }
-    _layers.add(
-      CardLayer(
-        id: id,
-        type: LayerType.text,
-        x: x,
-        y: y,
-        text: text,
-        fontSize: size,
-        color: color,
-        bold: bold,
-        italic: italic,
-        shadowOn: true,
-        shadowDx: 1,
-        shadowDy: 1,
-        shadowBlur: 3,
-      ),
+    // ⚠️ Inséré SOUS le nom et la rareté, comme toute autre couche.
+    // Avec un simple _layers.add(), les textes du modèle se retrouvaient
+    // tout en haut de la pile et recouvraient le nom — qui devenait alors
+    // impossible à attraper au doigt.
+    final insertAt = _layers.indexWhere(
+      (l) => l.role == LayerRole.cardName || l.role == LayerRole.cardRarity,
     );
+    final layer = CardLayer(
+      id: id,
+      type: LayerType.text,
+      x: x,
+      y: y,
+      text: text,
+      fontSize: size,
+      color: color,
+      bold: bold,
+      italic: italic,
+      shadowOn: true,
+      shadowDx: 1,
+      shadowDy: 1,
+      shadowBlur: 3,
+    );
+    if (insertAt < 0) {
+      _layers.add(layer);
+    } else {
+      _layers.insert(insertAt, layer);
+    }
   }
 
   /// Génère (ou régénère) les couches de texte correspondant aux données de
@@ -2400,11 +2410,86 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
-  Widget _buildSectionLabel(String label) => Align(
-    alignment: Alignment.centerLeft,
-    child: Text(
-      label,
-      style: const TextStyle(color: Colors.white70, fontSize: 14),
+  // ── Navigation dans le panneau de réglages ──────────────────────────────
+  // Le panneau est long (rareté, effet, jeu, fond, cadre…). Chaque titre
+  // porte une clé pour qu'on puisse y sauter directement depuis la barre de
+  // raccourcis, au lieu de faire défiler à l'aveugle.
+  final Map<String, GlobalKey> _sectionKeys = {};
+
+  GlobalKey _keyFor(String label) =>
+      _sectionKeys.putIfAbsent(label, () => GlobalKey());
+
+  Future<void> _jumpToSection(String label) async {
+    final ctx = _sectionKeys[label]?.currentContext;
+    if (ctx == null) return;
+    await Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      alignment: 0.05, // colle le titre en haut de la zone visible
+    );
+  }
+
+  /// Barre de raccourcis : n'affiche que les sections réellement présentes
+  /// à l'écran (elles diffèrent entre recto et verso).
+  Widget _buildSectionNav() {
+    final labels =
+        _showBack
+            ? const ['Couleur de fond']
+            : const ['Rareté', 'Effet', 'Jeu', 'Fond', 'Cadre'];
+    if (labels.length < 2) return const SizedBox.shrink();
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: labels.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder:
+            (_, i) => GestureDetector(
+              onTap: () => _jumpToSection(labels[i]),
+              child: Container(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF16213E),
+                  borderRadius: BorderRadius.circular(17),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Text(
+                  labels[i],
+                  style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                ),
+              ),
+            ),
+      ),
+    );
+  }
+
+  Widget _buildSectionLabel(String label) => Padding(
+    key: _keyFor(label),
+    padding: const EdgeInsets.only(bottom: 2),
+    child: Row(
+      children: [
+        // Liseré coloré : repère visuel fort pour découper le long panneau.
+        Container(
+          width: 3,
+          height: 16,
+          decoration: BoxDecoration(
+            color: const Color(0xFF6C4AB6),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ],
     ),
   );
 
@@ -2641,6 +2726,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
               child: Column(
                 children: [
+                  // Raccourcis vers les sections : évite de faire défiler
+                  // tout le panneau pour atteindre « Cadre » ou « Jeu ».
+                  _buildSectionNav(),
+                  const SizedBox(height: 12),
                   if (!_showBack) ...[
                     TextField(
                       controller: _nameController,
