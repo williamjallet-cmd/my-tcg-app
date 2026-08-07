@@ -20,7 +20,9 @@
       "Bash(flutter test *)",
       "Bash(python -)",
       "Bash(git mv *)",
-      "Bash(flutter devices *)"
+      "Bash(flutter devices *)",
+      "Bash(git merge --no-ff wip/communaute-recompense-et-corrections -m ' *)",
+      "Bash(git commit -m 'Autorisation locale pour la fusion *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"
