@@ -108,7 +108,22 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
 
   // ✨ Source de vérité unique : la pile de couches (index 0 = derrière)
   final List<CardLayer> _layers = [];
-  int _selected = -1; // index dans _layers, -1 = rien
+  // Index dans _layers, -1 = rien. Passe par un accesseur pour que TOUTE
+  // sélection prévienne l'écran parent — impossible d'en oublier une.
+  int _selectedRaw = -1;
+  int get _selected => _selectedRaw;
+
+  /// ⚠️ Tant qu'un élément est sélectionné, le parent GÈLE son défilement et
+  /// le balayage entre onglets.
+  ///
+  /// Sans ça, faire glisser un élément horizontalement changeait d'onglet :
+  /// dans l'arène des gestes, le TabBarView tranche avant que le
+  /// déplacement de l'élément n'ait commencé. Geler pendant le glissement
+  /// seul arrivait donc trop tard.
+  set _selected(int i) {
+    _selectedRaw = i;
+    widget.onMoveModeChanged?.call(i >= 0);
+  }
 
   // Mémorisation au début du geste (fix pinch + rotation 2 doigts)
   double _gestureStartScale = 1.0;
@@ -1284,9 +1299,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
 
     final selected = i == _selected;
 
+    // Marge tactile ajoutée plus bas autour des textes : on décale la
+    // position d'autant pour que le rendu reste EXACTEMENT au même endroit
+    // que sur la carte finale (qui, elle, n'a pas cette marge).
+    final touchPad = l.type == LayerType.text ? 8.0 : 0.0;
+
     return Positioned(
-      left: l.x,
-      top: l.y,
+      left: l.x - touchPad,
+      top: l.y - touchPad,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
@@ -1300,11 +1320,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         },
         // 🐛 Fix pinch : on mémorise l'état de départ du geste
         onScaleStart: (_) {
+          // Le gel du parent est declenche par l'accesseur _selected.
           setState(() => _selected = i);
           _gestureStartScale = l.scale;
           _gestureStartRotation = l.rotation;
-          // Gèle le défilement du parent pendant le déplacement.
-          widget.onMoveModeChanged?.call(true);
         },
         onScaleUpdate:
             (d) => setState(() {
@@ -1316,7 +1335,9 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 l.rotation = _gestureStartRotation + d.rotation * 180 / pi;
               }
             }),
-        onScaleEnd: (_) => widget.onMoveModeChanged?.call(false),
+        // Pas de degel ici : l'element reste selectionne, donc deplacable
+        // autant de fois qu'on veut. Le degel a lieu a la deselection
+        // (appui hors de la carte).
         child: Transform.rotate(
           angle: l.rotation * pi / 180,
           child: Transform(
@@ -1328,7 +1349,14 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             ),
             child: Opacity(
               opacity: l.opacity.clamp(0.05, 1.0),
-              child: _layerContent(l, selected: selected),
+              // Marge INVISIBLE autour du contenu : elle agrandit la zone
+              // sensible au doigt. Un texte fin de 9 pt etait presque
+              // impossible a attraper. Le rendu final n'est pas affecte,
+              // seule la surface tactile l'est (HitTestBehavior.opaque).
+              child: Padding(
+                padding: EdgeInsets.all(touchPad),
+                child: _layerContent(l, selected: selected),
+              ),
             ),
           ),
         ),
