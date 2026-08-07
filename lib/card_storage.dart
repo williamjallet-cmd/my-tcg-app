@@ -21,6 +21,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'card_layer.dart';
 import 'card_model.dart';
+import 'error_reporter.dart';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //   IMAGE SUPPLÉMENTAIRE (ancien format — conservé pour rétro-compat)
@@ -86,6 +87,10 @@ class SavedCard {
   final Uint8List? backImageBytes;
   final int backColor;
 
+  // ✨ Bloc 4 : fond du recto (couleur) + cadre décoratif (0 = aucun)
+  final int frontColor;
+  final int frameStyle;
+
   // Chemins Supabase Storage
   final String? imagePath;
   final String? backImagePath;
@@ -103,6 +108,8 @@ class SavedCard {
     List<ExtraImage>? extraImages,
     this.backImageBytes,
     this.backColor = 0xFF16213E,
+    this.frontColor = 0xFF1A1A2E,
+    this.frameStyle = 0,
     this.imagePath,
     this.backImagePath,
     this.nameX = 8,
@@ -144,6 +151,8 @@ class SavedCard {
     CardEffect effect = CardEffect.none,
     Uint8List? backImageBytes,
     int backColor = 0xFF16213E,
+    int frontColor = 0xFF1A1A2E,
+    int frameStyle = 0,
     String? backImagePath,
   }) {
     Uint8List? mainBytes;
@@ -155,6 +164,8 @@ class SavedCard {
     bool mainFound = false;
 
     for (final l in layers) {
+      // Le fond n'a pas d'équivalent legacy → exclu du miroir
+      if (l.role == LayerRole.background) continue;
       switch (l.type) {
         case LayerType.image:
           if (!mainFound) {
@@ -213,6 +224,8 @@ class SavedCard {
       extraImages: extras,
       backImageBytes: backImageBytes,
       backColor: backColor,
+      frontColor: frontColor,
+      frameStyle: frameStyle,
       backImagePath: backImagePath,
       nameX: nX,
       nameY: nY,
@@ -243,6 +256,8 @@ class SavedCard {
     extraImages: extraImages ?? this.extraImages,
     backImageBytes: backImageBytes ?? this.backImageBytes,
     backColor: backColor,
+    frontColor: frontColor,
+    frameStyle: frameStyle,
     imagePath: imagePath ?? this.imagePath,
     backImagePath: backImagePath ?? this.backImagePath,
     nameX: nameX,
@@ -263,8 +278,11 @@ List<SavedCard> _decodeOldCardsInBackground(String data) {
   for (final e in list) {
     try {
       cards.add(CardStorage.fromJson(e as Map<String, dynamic>));
-    } catch (_) {
-      // carte corrompue ignorée
+    } catch (err) {
+      // Carte corrompue : ignorée pour ne pas faire échouer toute la
+      // migration. debugPrint et non reportError : on est dans un isolate
+      // de fond (compute), sans accès à l'interface.
+      debugPrint('⚠️ Migration : carte illisible ignorée — $err');
     }
   }
   return cards;
@@ -345,6 +363,8 @@ class CardStorage {
             ? base64Encode(c.backImageBytes!)
             : null,
     'backColor': c.backColor,
+    'frontColor': c.frontColor,
+    'frameStyle': c.frameStyle,
     'nameX': c.nameX,
     'nameY': c.nameY,
     'rarityX': c.rarityX,
@@ -427,6 +447,8 @@ class CardStorage {
               : null,
       backImagePath: j['backImagePath'] as String?,
       backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      frontColor: (j['frontColor'] as int?) ?? 0xFF1A1A2E,
+      frameStyle: (j['frameStyle'] as int?) ?? 0,
       nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
       nameY: (j['nameY'] as num?)?.toDouble() ?? 200,
       rarityX: (j['rarityX'] as num?)?.toDouble() ?? 8,
@@ -447,6 +469,8 @@ class CardStorage {
     'imageY': c.imageY,
     'imageScale': c.imageScale,
     'backColor': c.backColor,
+    'frontColor': c.frontColor,
+    'frameStyle': c.frameStyle,
     'nameX': c.nameX,
     'nameY': c.nameY,
     'rarityX': c.rarityX,
@@ -569,6 +593,8 @@ class CardStorage {
       extraImages: extras,
       backImageBytes: back,
       backColor: (j['backColor'] as int?) ?? 0xFF16213E,
+      frontColor: (j['frontColor'] as int?) ?? 0xFF1A1A2E,
+      frameStyle: (j['frameStyle'] as int?) ?? 0,
       imagePath: j['imagePath'] as String?,
       backImagePath: j['backImagePath'] as String?,
       nameX: (j['nameX'] as num?)?.toDouble() ?? 8,
@@ -663,8 +689,18 @@ class CardStorage {
     List<SavedCard> cards;
     try {
       cards = await compute(_decodeOldCardsInBackground, old);
-    } catch (_) {
-      cards = [];
+    } catch (e) {
+      // ⚠️ Avant : `cards = []` puis on écrivait quand même _metaKey → la
+      // migration était marquée « terminée avec 0 carte » DÉFINITIVEMENT,
+      // et toutes les anciennes cartes devenaient invisibles sans un mot.
+      // Maintenant : on signale et on n'écrit RIEN, donc la migration sera
+      // retentée au prochain lancement. L'ancienne clé reste intacte.
+      reportError(
+        'Migration de tes anciennes cartes',
+        e,
+        level: ErrorLevel.dataLoss,
+      );
+      return;
     }
 
     final dir = await _imagesDir();

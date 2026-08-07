@@ -1,4 +1,14 @@
-// card_creator_screen.dart — BLOCS 1 + 2 + 3
+// card_creator_screen.dart — BLOCS 1 + 2 + 3 + 4
+//
+// ✨ Bloc 4 :
+//   • Fond du recto : couleur au choix + IMAGE plein cadre (couche
+//     verrouillée tout en bas de la pile) avec modes remplir/ajuster
+//     et voile assombrissant réglable
+//   • Cadres décoratifs dessinés en CustomPainter (or, argent, néon,
+//     pointillé) → zéro asset à charger
+//   • Stickers : icônes vectorielles colorables, couches à part entière
+//     (déplaçables, rotatives, duplicables) — liste d'icônes const pour
+//     rester compatible avec le tree-shaking des icônes en release
 //
 // ✨ Bloc 3 :
 //   • Gras / italique sur les textes
@@ -40,6 +50,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'card_layer.dart';
+import 'color_picker_sheet.dart';
 import 'card_model.dart';
 import 'card_inspector_screen.dart';
 import 'card_storage.dart';
@@ -72,6 +83,41 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   bool _showBack = false;
   int _backColor = 0xFF16213E;
   Uint8List? _backImageBytes;
+
+  // ✨ Bloc 4
+  int _frontColor = 0xFF1A1A2E;
+  int _frameStyle = 0; // 0=aucun, 1=or, 2=argent, 3=néon, 4=pointillé
+
+  static const List<IconData> _stickerIcons = [
+    Icons.star,
+    Icons.bolt,
+    Icons.favorite,
+    Icons.shield,
+    Icons.emoji_events,
+    Icons.whatshot,
+    Icons.auto_awesome,
+    Icons.sports_soccer,
+    Icons.music_note,
+    Icons.diamond,
+    Icons.rocket_launch,
+    Icons.pets,
+  ];
+
+  IconData _iconFor(int? codePoint) => _stickerIcons.firstWhere(
+    (i) => i.codePoint == codePoint,
+    orElse: () => Icons.star,
+  );
+
+  CardLayer? get _bgLayer =>
+      (_layers.isNotEmpty && _layers.first.role == LayerRole.background)
+          ? _layers.first
+          : null;
+
+  /// ✨ Photo dans laquelle la pipette du sélecteur prélève des couleurs.
+  /// C'est l'image du calque de fond — celle que le joueur voit derrière
+  /// sa carte. Null tant qu'aucune image n'a été choisie : la pipette est
+  /// alors simplement masquée.
+  Uint8List? get _sampleBytes => _bgLayer?.bytes;
 
   late AnimationController _effectController;
 
@@ -160,6 +206,21 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   //   ACTIONS
   // ────────────────────────────────────────────────────────
 
+  // Insère une nouvelle couche juste sous le nom/la rareté
+  // (= au-dessus de tout le reste) et la sélectionne.
+  void _insertLayer(CardLayer layer) {
+    final insertAt = _layers.indexWhere(
+      (l) => l.role == LayerRole.cardName || l.role == LayerRole.cardRarity,
+    );
+    if (insertAt < 0) {
+      _layers.add(layer);
+      _selected = _layers.length - 1;
+    } else {
+      _layers.insert(insertAt, layer);
+      _selected = insertAt;
+    }
+  }
+
   // 🐛 Fix mobile : toujours readAsBytes() (fonctionne web + mobile)
   Future<void> _pickImage({bool isBack = false}) async {
     final picker = ImagePicker();
@@ -174,24 +235,54 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       if (isBack) {
         _backImageBytes = bytes;
       } else {
-        // Nouvelle image insérée juste sous le nom/la rareté
-        // (= au-dessus des autres images/textes libres)
-        final insertAt = _layers.indexWhere((l) => l.role != LayerRole.normal);
-        final layer = CardLayer(
-          id: CardLayer.newId(),
-          type: LayerType.image,
-          bytes: bytes,
-          x: 0,
-          y: 0,
+        _insertLayer(
+          CardLayer(
+            id: CardLayer.newId(),
+            type: LayerType.image,
+            bytes: bytes,
+            x: 0,
+            y: 0,
+          ),
         );
-        if (insertAt < 0) {
-          _layers.add(layer);
-          _selected = _layers.length - 1;
-        } else {
-          _layers.insert(insertAt, layer);
-          _selected = insertAt;
-        }
       }
+    });
+  }
+
+  // ✨ Bloc 4 : image de fond (couche verrouillée à l'index 0)
+  Future<void> _pickBackgroundImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 900,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() {
+      final bg = _bgLayer;
+      if (bg != null) {
+        bg.bytes = bytes;
+        bg.storagePath = null; // nouvelle image → ancien chemin caduc
+      } else {
+        _layers.insert(
+          0,
+          CardLayer(
+            id: CardLayer.newId(),
+            type: LayerType.image,
+            role: LayerRole.background,
+            bytes: bytes,
+          ),
+        );
+        if (_selected >= 0) _selected++;
+      }
+    });
+  }
+
+  void _removeBackgroundImage() {
+    if (_bgLayer == null) return;
+    setState(() {
+      _layers.removeAt(0);
+      if (_selected > 0) _selected--;
     });
   }
 
@@ -203,23 +294,100 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       x: 50,
       y: 100,
     );
-    setState(() {
-      final insertAt = _layers.indexWhere((l) => l.role != LayerRole.normal);
-      if (insertAt < 0) {
-        _layers.add(layer);
-        _selected = _layers.length - 1;
-      } else {
-        _layers.insert(insertAt, layer);
-        _selected = insertAt;
-      }
-    });
+    setState(() => _insertLayer(layer));
     _editTextLayer(layer);
+  }
+
+  // ✨ Bloc 4 : stickers
+  void _openStickerPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF16213E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (sheetContext) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Stickers',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  GridView.count(
+                    crossAxisCount: 6,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    children:
+                        _stickerIcons
+                            .map(
+                              (ic) => InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  Navigator.pop(sheetContext);
+                                  setState(
+                                    () => _insertLayer(
+                                      CardLayer(
+                                        id: CardLayer.newId(),
+                                        type: LayerType.sticker,
+                                        x: 110,
+                                        y: 160,
+                                        stickerIcon: ic.codePoint,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white10,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    ic,
+                                    color: const Color(0xFFFFD700),
+                                    size: 28,
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+  /// ✨ Sélecteur complet (teinte / saturation / luminosité / opacité,
+  /// hexadécimal, pipette sur la photo) au lieu des 9 pastilles figées.
+  Future<void> _editStickerColor(CardLayer layer) async {
+    final c = await ColorPickerSheet.show(
+      context,
+      initial: Color(layer.stickerColor),
+      sampleImage: _sampleBytes,
+    );
+    if (c == null) return;
+    setState(() => layer.stickerColor = c.toARGB32());
   }
 
   void _moveLayer(int delta) {
     final i = _selected;
     final j = i + delta;
-    if (i < 0 || j < 0 || j >= _layers.length) return;
+    // Le fond reste verrouillé tout en bas : rien ne passe dessous
+    final minIndex = _bgLayer != null ? 1 : 0;
+    if (i < minIndex || j < minIndex || j >= _layers.length) return;
     setState(() {
       final l = _layers.removeAt(i);
       _layers.insert(j, l);
@@ -343,43 +511,57 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                           style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children:
-                              [
-                                Colors.white,
-                                Colors.black,
-                                Colors.yellow,
-                                Colors.red,
-                                Colors.blue,
-                                Colors.green,
-                                Colors.orange,
-                                Colors.purple,
-                                Colors.pink,
-                              ].map((c) {
-                                return GestureDetector(
-                                  onTap:
-                                      () => setDialogState(
-                                        () => selectedColor = c,
-                                      ),
-                                  child: Container(
-                                    width: 30,
-                                    height: 30,
-                                    decoration: BoxDecoration(
-                                      color: c,
-                                      shape: BoxShape.circle,
-                                      border:
-                                          selectedColor == c
-                                              ? Border.all(
-                                                color: Colors.white,
-                                                width: 3,
-                                              )
-                                              : null,
+                        // ✨ Palette complète (+ pipette sur la photo)
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: selectedColor,
+                              sampleImage: _sampleBytes,
+                            );
+                            if (c != null) {
+                              setDialogState(() => selectedColor = c);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 28,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: selectedColor,
+                                    borderRadius: BorderRadius.circular(7),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                const Expanded(
+                                  child: Text(
+                                    'Choisir une couleur',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
                                     ),
                                   ),
-                                );
-                              }).toList(),
+                                ),
+                                const Icon(
+                                  Icons.palette_rounded,
+                                  color: Colors.white54,
+                                  size: 19,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                         const SizedBox(height: 16),
                         const Text(
@@ -1016,7 +1198,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           );
         }
       case LayerType.sticker:
-        content = const SizedBox(); // bloc 4
+        content = Icon(
+          _iconFor(l.stickerIcon),
+          size: 48,
+          color: Color(l.stickerColor),
+        );
     }
 
     // Cadre de sélection — DANS les transformations : il tourne et se
@@ -1035,6 +1221,29 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   Widget _buildLayer(int i) {
     final l = _layers[i];
     if (!l.visible) return const SizedBox();
+
+    // ✨ Bloc 4 : le fond est rendu plein cadre, hors gestes
+    // (IgnorePointer → taper dessus désélectionne, comme le fond couleur)
+    if (l.role == LayerRole.background) {
+      return Positioned.fill(
+        child: IgnorePointer(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (l.bytes != null)
+                Image.memory(
+                  l.bytes!,
+                  fit: l.bgFit == 1 ? BoxFit.contain : BoxFit.cover,
+                  cacheWidth: 800,
+                ),
+              if (l.bgDarken > 0)
+                Container(color: Colors.black.withValues(alpha: l.bgDarken)),
+            ],
+          ),
+        ),
+      );
+    }
+
     final selected = i == _selected;
 
     return Positioned(
@@ -1098,7 +1307,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       height: _kCardH,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(13),
-        color: const Color(0xFF1A1A2E),
+        color: Color(_frontColor), // ✨ Bloc 4 : couleur de fond du recto
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(13),
@@ -1115,6 +1324,13 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             for (int i = 0; i < _layers.length; i++) _buildLayer(i),
             if (_effect == CardEffect.holographic) _buildHolographicEffect(),
             if (_effect == CardEffect.shiny) _buildShinyEffect(),
+            // ✨ Bloc 4 : cadre décoratif par-dessus tout
+            if (_frameStyle != 0)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(painter: _FramePainter(_frameStyle)),
+                ),
+              ),
           ],
         ),
       ),
@@ -1270,6 +1486,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
               _pillButton(Icons.flip_to_back, () => _moveLayer(-1)),
               if (l.type == LayerType.text && l.role != LayerRole.cardRarity)
                 _pillButton(Icons.edit, () => _editTextLayer(l)),
+              if (l.type == LayerType.sticker)
+                _pillButton(Icons.palette, () => _editStickerColor(l)),
               if (l.isDeletable) _pillButton(Icons.copy, _duplicateSelected),
               if (l.isDeletable)
                 _pillButton(
@@ -1381,7 +1599,15 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   String _layerLabel(CardLayer l) {
     switch (l.type) {
       case LayerType.image:
-        final images = _layers.where((e) => e.type == LayerType.image).toList();
+        if (l.role == LayerRole.background) return 'Fond (toujours derrière)';
+        final images =
+            _layers
+                .where(
+                  (e) =>
+                      e.type == LayerType.image &&
+                      e.role != LayerRole.background,
+                )
+                .toList();
         return 'Image ${images.indexOf(l) + 1}';
       case LayerType.text:
         if (l.role == LayerRole.cardName) {
@@ -1490,7 +1716,9 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                             refresh(() {
                               final sel = _sel; // suit la couche, pas l'index
                               final li = _layers.length - 1 - oldP;
-                              final ln = _layers.length - 1 - newP;
+                              var ln = _layers.length - 1 - newP;
+                              // Rien ne passe sous le fond verrouillé
+                              if (_bgLayer != null && ln < 1) ln = 1;
                               final l = _layers.removeAt(li);
                               _layers.insert(ln, l);
                               if (sel != null) {
@@ -1501,6 +1729,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                           itemBuilder: (context, p) {
                             final i = _layers.length - 1 - p;
                             final l = _layers[i];
+                            final isBg = l.role == LayerRole.background;
                             final selected = i == _selected;
                             return Container(
                               key: ValueKey(l.id),
@@ -1518,7 +1747,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                               ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(8),
-                                onTap: () => refresh(() => _selected = i),
+                                onTap:
+                                    isBg
+                                        ? null
+                                        : () => refresh(() => _selected = i),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
@@ -1526,17 +1758,27 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                                   ),
                                   child: Row(
                                     children: [
-                                      ReorderableDragStartListener(
-                                        index: p,
-                                        child: const Padding(
+                                      if (isBg)
+                                        const Padding(
                                           padding: EdgeInsets.all(6),
                                           child: Icon(
-                                            Icons.drag_indicator,
-                                            size: 20,
-                                            color: Colors.white38,
+                                            Icons.lock,
+                                            size: 18,
+                                            color: Colors.white30,
+                                          ),
+                                        )
+                                      else
+                                        ReorderableDragStartListener(
+                                          index: p,
+                                          child: const Padding(
+                                            padding: EdgeInsets.all(6),
+                                            child: Icon(
+                                              Icons.drag_indicator,
+                                              size: 20,
+                                              color: Colors.white38,
+                                            ),
                                           ),
                                         ),
-                                      ),
                                       const SizedBox(width: 4),
                                       Opacity(
                                         opacity: l.visible ? 1 : 0.4,
@@ -1561,7 +1803,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                                           ),
                                         ),
                                       ),
-                                      if (!l.isDeletable)
+                                      if (!l.isDeletable &&
+                                          l.role != LayerRole.background)
                                         const Padding(
                                           padding: EdgeInsets.only(right: 4),
                                           child: Icon(
@@ -1632,6 +1875,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       effect: _effect,
       backImageBytes: _backImageBytes,
       backColor: _backColor,
+      frontColor: _frontColor,
+      frameStyle: _frameStyle,
     );
     await CardStorage.addCard(card);
     if (!mounted) return;
@@ -1892,20 +2137,41 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () => _pickImage(isBack: false),
-                            icon: const Icon(Icons.photo_library),
-                            label: const Text('Ajouter image'),
+                            icon: const Icon(Icons.photo_library, size: 18),
+                            label: const Text(
+                              'Image',
+                              style: TextStyle(fontSize: 12),
+                            ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF16213E),
                               foregroundColor: Colors.white,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: _addTextZone,
-                            icon: const Icon(Icons.text_fields),
-                            label: const Text('Ajouter texte'),
+                            icon: const Icon(Icons.text_fields, size: 18),
+                            label: const Text(
+                              'Texte',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16213E),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _openStickerPicker,
+                            icon: const Icon(Icons.emoji_emotions, size: 18),
+                            label: const Text(
+                              'Sticker',
+                              style: TextStyle(fontSize: 12),
+                            ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF16213E),
                               foregroundColor: Colors.white,
@@ -1914,33 +2180,305 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ),
                       ],
                     ),
-                  ] else ...[
-                    _buildSectionLabel('Couleur de fond'),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 24),
+                    // ✨ Bloc 4 : fond du recto
+                    _buildSectionLabel('Fond'),
+                    const SizedBox(height: 8),
+                    // ✨ Raccourcis + accès à la palette complète
                     Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        ..._backColors.map((c) {
+                          return GestureDetector(
+                            onTap: () => setState(() => _frontColor = c),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Color(c),
+                                shape: BoxShape.circle,
+                                border:
+                                    _frontColor == c
+                                        ? Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        )
+                                        : Border.all(color: Colors.white24),
+                              ),
+                            ),
+                          );
+                        }),
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: Color(_frontColor),
+                              sampleImage: _sampleBytes,
+                              allowAlpha: false,
+                            );
+                            if (c != null) {
+                              setState(() => _frontColor = c.toARGB32());
+                            }
+                          },
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFFFFC83D),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              color: Color(0xFFFFC83D),
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _pickBackgroundImage,
+                            icon: const Icon(Icons.wallpaper, size: 18),
+                            label: Text(
+                              _bgLayer == null
+                                  ? 'Image de fond'
+                                  : 'Changer l\'image de fond',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16213E),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (_bgLayer != null)
+                          IconButton(
+                            onPressed: _removeBackgroundImage,
+                            icon: const Icon(
+                              Icons.delete,
+                              color: Colors.redAccent,
+                            ),
+                            tooltip: 'Retirer l\'image de fond',
+                          ),
+                      ],
+                    ),
+                    if (_bgLayer != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () => setState(() => _bgLayer!.bgFit = 0),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                    _bgLayer!.bgFit == 0
+                                        ? const Color(0xFF6C4AB6)
+                                        : Colors.transparent,
+                                border: Border.all(
+                                  color: const Color(0xFF6C4AB6),
+                                ),
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                              child: Text(
+                                'Remplir',
+                                style: TextStyle(
+                                  color:
+                                      _bgLayer!.bgFit == 0
+                                          ? Colors.white
+                                          : const Color(0xFF6C4AB6),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => setState(() => _bgLayer!.bgFit = 1),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                    _bgLayer!.bgFit == 1
+                                        ? const Color(0xFF6C4AB6)
+                                        : Colors.transparent,
+                                border: Border.all(
+                                  color: const Color(0xFF6C4AB6),
+                                ),
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                              child: Text(
+                                'Ajuster',
+                                style: TextStyle(
+                                  color:
+                                      _bgLayer!.bgFit == 1
+                                          ? Colors.white
+                                          : const Color(0xFF6C4AB6),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 70,
+                            child: Text(
+                              'Assombrir',
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Slider(
+                              value: _bgLayer!.bgDarken.clamp(0.0, 0.7),
+                              min: 0,
+                              max: 0.7,
+                              activeColor: const Color(0xFF6C4AB6),
+                              onChanged:
+                                  (v) => setState(() => _bgLayer!.bgDarken = v),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 38,
+                            child: Text(
+                              '${(_bgLayer!.bgDarken * 100).round()}%',
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    // ✨ Bloc 4 : cadre décoratif
+                    _buildSectionLabel('Cadre'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children:
-                          _backColors.map((c) {
+                          const {
+                            0: 'Aucun',
+                            1: 'Or',
+                            2: 'Argent',
+                            3: 'Néon',
+                            4: 'Pointillé',
+                          }.entries.map((e) {
+                            final sel = _frameStyle == e.key;
                             return GestureDetector(
-                              onTap: () => setState(() => _backColor = c),
+                              onTap: () => setState(() => _frameStyle = e.key),
                               child: Container(
-                                width: 40,
-                                height: 40,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: Color(c),
-                                  shape: BoxShape.circle,
-                                  border:
-                                      _backColor == c
-                                          ? Border.all(
-                                            color: Colors.white,
-                                            width: 3,
-                                          )
-                                          : Border.all(color: Colors.white24),
+                                  color:
+                                      sel
+                                          ? const Color(0xFF6C4AB6)
+                                          : Colors.transparent,
+                                  border: Border.all(
+                                    color: const Color(0xFF6C4AB6),
+                                  ),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  e.value,
+                                  style: TextStyle(
+                                    color:
+                                        sel
+                                            ? Colors.white
+                                            : const Color(0xFF6C4AB6),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
                             );
                           }).toList(),
+                    ),
+                  ] else ...[
+                    _buildSectionLabel('Couleur de fond'),
+                    const SizedBox(height: 12),
+                    // ✨ Raccourcis + accès à la palette complète
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        ..._backColors.map((c) {
+                          return GestureDetector(
+                            onTap: () => setState(() => _backColor = c),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Color(c),
+                                shape: BoxShape.circle,
+                                border:
+                                    _backColor == c
+                                        ? Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        )
+                                        : Border.all(color: Colors.white24),
+                              ),
+                            ),
+                          );
+                        }),
+                        GestureDetector(
+                          onTap: () async {
+                            final c = await ColorPickerSheet.show(
+                              context,
+                              initial: Color(_backColor),
+                              sampleImage: _sampleBytes,
+                              allowAlpha: false,
+                            );
+                            if (c != null) {
+                              setState(() => _backColor = c.toARGB32());
+                            }
+                          },
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFFFFC83D),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              color: Color(0xFFFFC83D),
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
@@ -1961,4 +2499,120 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       ),
     );
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   ✨ Bloc 4 : CADRES DÉCORATIFS (CustomPainter, zéro asset)
+//   1 = Or  ·  2 = Argent  ·  3 = Néon  ·  4 = Pointillé
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class _FramePainter extends CustomPainter {
+  final int style;
+  _FramePainter(this.style);
+
+  RRect _rrect(Size size, double inset, double radius) =>
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          inset,
+          inset,
+          size.width - inset * 2,
+          size.height - inset * 2,
+        ),
+        Radius.circular(radius),
+      );
+
+  void _corners(Canvas canvas, Size size, Color color) {
+    final paint =
+        Paint()
+          ..color = color
+          ..strokeWidth = 2.5
+          ..strokeCap = StrokeCap.round;
+    const len = 16.0;
+    const m = 14.0; // marge depuis le coin
+    final w = size.width, h = size.height;
+    // Petites équerres diagonales dans les 4 coins
+    canvas.drawLine(Offset(m, m + len), Offset(m + len, m), paint);
+    canvas.drawLine(Offset(w - m, m + len), Offset(w - m - len, m), paint);
+    canvas.drawLine(Offset(m, h - m - len), Offset(m + len, h - m), paint);
+    canvas.drawLine(
+      Offset(w - m, h - m - len),
+      Offset(w - m - len, h - m),
+      paint,
+    );
+  }
+
+  void _doubleStroke(Canvas canvas, Size size, Color outer, Color inner) {
+    canvas.drawRRect(
+      _rrect(size, 5, 10),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = outer,
+    );
+    canvas.drawRRect(
+      _rrect(size, 10, 7),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = inner,
+    );
+    _corners(canvas, size, outer);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    switch (style) {
+      case 1: // Or
+        _doubleStroke(
+          canvas,
+          size,
+          const Color(0xFFFFD700),
+          const Color(0xFFFFF3B0),
+        );
+      case 2: // Argent
+        _doubleStroke(
+          canvas,
+          size,
+          const Color(0xFFC0C0C0),
+          const Color(0xFFF2F2F2),
+        );
+      case 3: // Néon : halo flou + trait net
+        canvas.drawRRect(
+          _rrect(size, 6, 10),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..color = const Color(0xAA00E5FF)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+        );
+        canvas.drawRRect(
+          _rrect(size, 6, 10),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..color = const Color(0xFFB2FFFF),
+        );
+      case 4: // Pointillé
+        final paint =
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..strokeCap = StrokeCap.round
+              ..color = Colors.white70;
+        final path = Path()..addRRect(_rrect(size, 6, 10));
+        for (final metric in path.computeMetrics()) {
+          double d = 0;
+          while (d < metric.length) {
+            canvas.drawPath(
+              metric.extractPath(d, min(d + 8, metric.length)),
+              paint,
+            );
+            d += 14;
+          }
+        }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_FramePainter oldDelegate) => oldDelegate.style != style;
 }

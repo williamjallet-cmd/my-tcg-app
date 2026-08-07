@@ -105,7 +105,10 @@ class AuthService {
   Future<void> signOut() async {
     try {
       await GoogleSignIn().signOut();
-    } catch (_) {}
+    } catch (_) {
+      // Volontairement silencieux : échoue normalement quand le compte n'a
+      // jamais utilisé Google. La déconnexion Supabase ci-dessous fait foi.
+    }
     await _db.auth.signOut();
   }
 

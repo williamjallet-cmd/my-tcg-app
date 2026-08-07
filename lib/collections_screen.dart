@@ -2,16 +2,16 @@
 // RESKIN rétro-arcade premium. Logique inchangée (chargement, timer,
 // navigation, création, suppression, édition, partage).
 
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'card_storage.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
+import 'pack_countdown.dart';
 import 'collection_detail_screen.dart';
-import 'daily_reward_card.dart';
+import 'community_screen.dart';
+import 'community_service.dart';
 import 'arcade_theme.dart';
 
 // Accent arcade par collection (déterministe sur l'id) — or / teal / corail / épique
@@ -255,22 +255,26 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                 actions: [
                   IconButton(
                     icon: const Icon(
+                      Icons.travel_explore_rounded,
+                      color: Arcade.cream,
+                    ),
+                    tooltip: 'Communauté',
+                    onPressed:
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CommunityScreen(),
+                          ),
+                        ).then((_) => _load()),
+                  ),
+                  IconButton(
+                    icon: const Icon(
                       Icons.refresh_rounded,
                       color: Arcade.cream,
                     ),
                     onPressed: _load,
                   ),
                 ],
-              ),
-              // ── Bandeau « Récompense du jour » ──────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: DailyRewardBanner(
-                    collections: _collections,
-                    onClaimed: _load,
-                  ),
-                ),
               ),
               if (_loading)
                 const SliverFillRemaining(
@@ -382,9 +386,7 @@ class _CollectionCard extends StatefulWidget {
 }
 
 class _CollectionCardState extends State<_CollectionCard> {
-  Duration _remaining = Duration.zero;
   bool _canOpen = false;
-  Timer? _timer;
   int _memberCount = 0;
   int _totalCards = 0;
   int _obtainedCards = 0;
@@ -397,61 +399,46 @@ class _CollectionCardState extends State<_CollectionCard> {
 
   Future<void> _refresh() async {
     final results = await Future.wait([
-      PackSystem.timeUntilNextPack(widget.collection.id),
-      PackSystem.canOpenPack(widget.collection.id),
+      PackSystem.canOpenPack(
+        widget.collection.id,
+        cooldownHours: widget.collection.packCooldownHours,
+      ),
       CollectionService.instance.getMemberCount(widget.collection.id),
-      CollectionService.instance.getCollectionCardIds(widget.collection.id),
+      // Lecture seule (compteur) : un échec ne doit pas casser la vignette.
+      CollectionService.instance.getCollectionCardIdsOrEmpty(
+        widget.collection.id,
+      ),
+      CollectionService.instance.getMyOwnedCardIds(widget.collection.id),
+      CardStorage.loadCards(),
     ]);
 
-    final r = results[0] as Duration;
-    final c = results[1] as bool;
-    final members = results[2] as int;
-    final cardIds = results[3] as List<String>;
+    final c = results[0] as bool;
+    final members = results[1] as int;
+    final cardIds = results[2] as List<String>;
+    final ownedIds = (results[3] as List<String>).toSet();
+    final localCards = results[4] as List<SavedCard>;
 
-    final prefs = await SharedPreferences.getInstance();
-    final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
-    // ✨ FIX : on ne compte que les cartes encore présentes dans le catalogue
-    // (les cartes supprimées de la collection ne gonflent plus le compteur)
+    // ✅ RÈGLE COMMUNE avec le DEX : seules les cartes RÉELLES comptent.
+    // Une entrée de catalogue orpheline (sans card_data, n'affichant aucune
+    // carte) ne gonfle plus le total — d'où le même chiffre sur les 2 écrans.
     final catalogueIds = cardIds.toSet();
-    final obtained =
-        (prefs.getStringList('obtained_${uid}_${widget.collection.id}') ?? [])
-            .where(catalogueIds.contains)
-            .length;
+    final realIds =
+        localCards.map((card) => card.id).where(catalogueIds.contains).toSet();
+    final total = realIds.length;
+    final obtained = ownedIds.where(realIds.contains).length;
 
     if (mounted) {
       setState(() {
-        _remaining = r;
         _canOpen = c;
         _memberCount = members;
-        _totalCards = cardIds.length;
+        _totalCards = total;
         _obtainedCards = obtained;
       });
     }
-    if (!c) {
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) {
-          _timer?.cancel();
-          return;
-        }
-        final next = _remaining - const Duration(seconds: 1);
-        if (next <= Duration.zero) {
-          _timer?.cancel();
-          setState(() {
-            _remaining = Duration.zero;
-            _canOpen = true;
-          });
-        } else {
-          setState(() => _remaining = next);
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
+    // ✨ Plus de Timer ici : le décompte tourne dans PackCountdown, qui ne
+    // reconstruit que son propre texte. Avant, chaque vignette de collection
+    // se redessinait entièrement une fois par seconde — dix collections
+    // affichées = dix reconstructions complètes par seconde.
   }
 
   bool get _isOwner => widget.collection.isOwnedBy(widget.myUserId);
@@ -709,9 +696,18 @@ class _CollectionCardState extends State<_CollectionCard> {
               style: Arcade.pixel(size: 7, color: Arcade.creamFaint),
             ),
             const SizedBox(height: 2),
-            Text(
-              PackSystem.formatDuration(_remaining),
-              style: Arcade.title(size: 14, color: Arcade.teal),
+            // ✨ Seul ce Text se reconstruit chaque seconde.
+            PackCountdown(
+              collectionId: widget.collection.id,
+              cooldownHours: widget.collection.packCooldownHours,
+              onReady: () {
+                if (mounted) setState(() => _canOpen = true);
+              },
+              builder:
+                  (_, remaining, __) => Text(
+                    PackSystem.formatDuration(remaining),
+                    style: Arcade.title(size: 14, color: Arcade.teal),
+                  ),
             ),
           ],
         ),
@@ -756,6 +752,7 @@ class _EditCollectionSheet extends StatefulWidget {
 class _EditCollectionSheetState extends State<_EditCollectionSheet> {
   late int _cooldown;
   late bool _membersCanAdd;
+  late bool _isPublic;
   Uint8List? _newImageBytes;
   bool _saving = false;
   final _cooldowns = [1, 2, 3, 6, 12, 24];
@@ -765,6 +762,7 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
     super.initState();
     _cooldown = widget.collection.packCooldownHours;
     _membersCanAdd = widget.collection.membersCanAddCards;
+    _isPublic = widget.collection.isPublic;
   }
 
   Future<void> _pickImage() async {
@@ -787,6 +785,17 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
         packCooldownHours: _cooldown,
         membersCanAddCards: _membersCanAdd,
       );
+      // ⚠️ Non bloquant : si la colonne `is_public` n'existe pas encore en
+      // base, l'échec ne doit PAS annuler l'enregistrement du reste
+      // (couverture, cooldown, permissions).
+      try {
+        await CommunityService.instance.setPublic(
+          widget.collection.id,
+          _isPublic,
+        );
+      } catch (e) {
+        debugPrint('⚠️ setPublic (collection non publiée) : $e');
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -956,6 +965,45 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
                   value: _membersCanAdd,
                   onChanged: (v) => setState(() => _membersCanAdd = v),
                   activeColor: Arcade.gold,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Arcade.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Arcade.line),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.travel_explore_rounded,
+                  color: Arcade.creamDim,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Visible dans la communauté',
+                        style: Arcade.body(size: 13, weight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Les autres joueurs pourront la découvrir et la rejoindre',
+                        style: Arcade.body(size: 11, color: Arcade.creamFaint),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _isPublic,
+                  onChanged: (v) => setState(() => _isPublic = v),
+                  activeColor: Arcade.teal,
                 ),
               ],
             ),

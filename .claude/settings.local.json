@@ -7,7 +7,22 @@
       "Bash(rm \"c:/Users/willi/tcg_app/lib/admin_screen.dart\")",
       "Bash(flutter pub *)",
       "PowerShell(Copy-Item \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\Card media service � DART\" \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card_media_service.dart\")",
-      "PowerShell(Copy-Item \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card frame.dart\" \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card_frame.dart\")"
+      "PowerShell(Copy-Item \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card frame.dart\" \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card_frame.dart\")",
+      "PowerShell(Copy-Item \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\Card layer.dart\" \"c:\\\\Users\\\\willi\\\\tcg_app\\\\lib\\\\card_layer.dart\")",
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(python -m py_compile migrate_v1_to_v2.py)",
+      "Bash(git check-ignore *)",
+      "Bash(git checkout *)",
+      "Bash(grep -rn \"catch \\(_\\) *{ *}\\\\|catch \\(_\\) {$\" lib/)",
+      "Bash(flutter test *)",
+      "Bash(python -)",
+      "Bash(git mv *)",
+      "Bash(flutter devices *)",
+      "Bash(git merge --no-ff wip/communaute-recompense-et-corrections -m ' *)",
+      "Bash(git commit -m 'Autorisation locale pour la fusion *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"

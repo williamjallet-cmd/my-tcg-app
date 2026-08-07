@@ -1,6 +1,11 @@
 // profile_service.dart — fix updateProfile + avatar
+// ✨ @pseudo UNIQUE : le nom affiché reste libre (deux « Will » possibles),
+//    mais le @pseudo identifie sans ambiguïté chaque joueur dans les amis.
+//    L'unicité réelle est garantie par une contrainte UNIQUE en base ;
+//    la vérification côté app sert juste à afficher un message clair.
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'error_reporter.dart';
 
 class UserProfile {
   final String id;
@@ -55,8 +60,79 @@ class ProfileService {
           await _db.from('profiles').select().eq('id', _myId).maybeSingle();
       if (res == null) return null;
       return UserProfile.fromMap(res);
-    } catch (_) {
+    } catch (e) {
+      reportError('Chargement de ton profil', e);
       return null;
+    }
+  }
+
+  // ── @pseudo : normalisation, validation, disponibilité ────────────────────
+
+  /// Forme canonique d'un @pseudo : minuscules, sans @, espaces → _
+  static String normalizeUsername(String raw) => raw
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'^@+'), '')
+      .replaceAll(RegExp(r'\s+'), '_');
+
+  /// Message d'erreur si le format est invalide, sinon null.
+  /// 3-20 caractères, lettres/chiffres/_ uniquement.
+  static String? validateUsername(String raw) {
+    final u = normalizeUsername(raw);
+    if (u.isEmpty) return 'Choisis un pseudo.';
+    if (u.length < 3) return 'Trop court (3 caractères minimum).';
+    if (u.length > 20) return 'Trop long (20 caractères maximum).';
+    if (!RegExp(r'^[a-z0-9_]+$').hasMatch(u)) {
+      return 'Lettres, chiffres et _ uniquement.';
+    }
+    return null;
+  }
+
+  /// True si le @pseudo est libre (ou déjà le mien).
+  Future<bool> isUsernameAvailable(String raw) async {
+    final u = normalizeUsername(raw);
+    if (u.isEmpty) return false;
+    try {
+      final res =
+          await _db
+              .from('profiles')
+              .select('id')
+              .eq('username', u)
+              .maybeSingle();
+      return res == null || res['id'] == _myId;
+    } catch (e) {
+      // Sans ce signalement, l'utilisateur voyait « pseudo déjà pris »
+      // alors que c'est la VÉRIFICATION qui a échoué (réseau, RLS…).
+      reportError('Vérification du pseudo', e);
+      return false; // en cas de doute, on ne laisse pas passer
+    }
+  }
+
+  /// Change mon @pseudo. Lève une Exception avec un message lisible si le
+  /// format est invalide ou si le pseudo est déjà pris (y compris en cas de
+  /// collision détectée par la contrainte UNIQUE côté base).
+  Future<UserProfile?> updateUsername(String raw) async {
+    final err = validateUsername(raw);
+    if (err != null) throw Exception(err);
+    final u = normalizeUsername(raw);
+    if (!await isUsernameAvailable(u)) {
+      throw Exception('Le pseudo « @$u » est déjà pris.');
+    }
+    try {
+      final res =
+          await _db
+              .from('profiles')
+              .update({'username': u})
+              .eq('id', _myId)
+              .select()
+              .single();
+      return UserProfile.fromMap(res);
+    } on PostgrestException catch (e) {
+      // 23505 = violation de contrainte UNIQUE (course entre deux joueurs)
+      if (e.code == '23505') {
+        throw Exception('Le pseudo « @$u » vient d\'être pris.');
+      }
+      throw Exception('Impossible de changer le pseudo : ${e.message}');
     }
   }
 
@@ -90,19 +166,48 @@ class ProfileService {
         final res =
             await _db.from('profiles').upsert(upsertData).select().single();
         return UserProfile.fromMap(res);
-      } catch (_) {
+      } catch (e) {
+        // Dernier recours épuisé : le profil n'est PAS enregistré.
+        reportError(
+          'Enregistrement de ton profil',
+          e,
+          level: ErrorLevel.dataLoss,
+        );
         return null;
       }
     }
   }
 
+  /// Nettoie un terme de recherche avant de l'injecter dans un filtre.
+  ///
+  /// Deux problèmes à neutraliser :
+  ///  • `%` et `_` sont des jokers SQL. Taper « % » renvoyait donc TOUT le
+  ///    monde, et un pseudo contenant « _ » matchait n'importe quel
+  ///    caractère à cette position.
+  ///  • `"` et `\` casseraient la valeur entre guillemets ci-dessous.
+  ///
+  /// La virgule et les parenthèses, elles, sont conservées : elles sont
+  /// protégées par les guillemets du filtre.
+  static String _searchTerm(String raw) =>
+      raw.replaceAll(RegExp(r'[%_\\"]'), '').trim();
+
   Future<List<UserProfile>> searchUsers(String query) async {
     if (query.trim().isEmpty) return [];
-    final q = query.trim().toLowerCase();
+    // Le « @ » tapé par l'utilisateur ne fait pas partie du pseudo stocké.
+    final q = _searchTerm(
+      query.trim().toLowerCase().replaceAll(RegExp(r'^@+'), ''),
+    );
+    if (q.isEmpty) return [];
+    // ✅ CORRECTIF : la valeur est entre GUILLEMETS.
+    // Avant, elle était insérée telle quelle dans l'expression `or(...)`,
+    // que PostgREST découpe sur les virgules de premier niveau. Chercher
+    // « Jean, Marie » produisait donc des conditions incohérentes et la
+    // requête partait en erreur 400 — la recherche semblait cassée dès
+    // qu'un nom contenait une virgule ou une parenthèse.
     final res = await _db
         .from('profiles')
         .select()
-        .or('username.ilike.%$q%,display_name.ilike.%$q%')
+        .or('username.ilike."%$q%",display_name.ilike."%$q%"')
         .neq('id', _myId)
         .limit(20);
     return (res as List).map((r) => UserProfile.fromMap(r)).toList();

@@ -13,6 +13,7 @@ import 'auth_service.dart';
 import 'auth_screen.dart';
 import 'profile_service.dart';
 import 'collection_service.dart';
+import 'error_reporter.dart';
 import 'secrets.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -253,6 +254,9 @@ class TCGApp extends StatelessWidget {
     return MaterialApp(
       title: 'TCG App',
       debugShowCheckedModeBanner: false,
+      // Permet aux services (sans BuildContext) d'afficher une erreur
+      // au lieu de la perdre dans la console — voir error_reporter.dart
+      scaffoldMessengerKey: appMessengerKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: _gold,
@@ -321,11 +325,13 @@ class _AuthGateState extends State<_AuthGate> {
       onError: (Object error, StackTrace stack) {
         if (!mounted) return;
         debugPrint('Auth stream error (réseau/token) : $error');
-        // Token expiré + refresh impossible → déconnecter proprement
-        if (error is AuthException ||
-            error.toString().contains('AuthRetryableFetchException')) {
+        // ✅ FIX : AuthRetryableFetchException = panne RÉSEAU passagère
+        // (DNS, Wi-Fi, 4G). Ce n'est PAS un token invalide → on GARDE la
+        // session, Supabase retentera tout seul.
+        if (error is AuthRetryableFetchException) return;
+        // Vraie erreur d'auth (token révoqué) → déconnexion propre
+        if (error is AuthException) {
           setState(() => _loggedIn = false);
-          // Déconnexion propre côté Supabase (ignore les erreurs réseau)
           Supabase.instance.client.auth.signOut().catchError((_) {});
         }
       },
@@ -848,21 +854,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final friends = await ProfileService.instance.getFriends();
     final collections = await CollectionService.instance.getMyCollections();
 
-    // On ne compte que les cartes des collections encore existantes.
-    // Une collection supprimée disparaît de getMyCollections(), donc ses
-    // cartes ne sont plus comptées.
-    final cardIds = <String>{};
-    for (final col in collections) {
-      final ids = await CollectionService.instance.getCollectionCardIds(col.id);
-      cardIds.addAll(ids);
-    }
+    // ✅ FIX : on compte les cartes réellement POSSÉDÉES par le joueur,
+    // pas la taille du catalogue. Bonus perf : 1 requête au lieu d'une
+    // par collection.
+    // ✅ FIX 2 : restreint aux collections encore rejointes — sinon les
+    // cartes des collections quittées gonflaient le compteur à vie.
+    final ownedCount = await CollectionService.instance.getMyOwnedCardCount(
+      collectionIds: collections.map((c) => c.id).toList(),
+    );
 
     if (mounted) {
       setState(() {
         _profile = profile;
         _friendsCount = friends.length;
         _collectionsCount = collections.length;
-        _cardsCount = cardIds.length;
+        _cardsCount = ownedCount;
         _loading = false;
       });
     }
@@ -946,7 +952,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _uploading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      // L'avatar n'a pas été changé : le dire, sinon le joueur croit
+      // que l'app a simplement ignoré son choix.
+      reportError('Changement d\'avatar', e, level: ErrorLevel.dataLoss);
       if (mounted) setState(() => _uploading = false);
     }
   }
@@ -1018,6 +1027,131 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
+          ),
+    );
+  }
+
+  // ✨ @pseudo UNIQUE : deux joueurs peuvent s'appeler « Will », mais leur
+  // @pseudo les distingue sans ambiguïté dans la liste d'amis.
+  void _showEditUsername() {
+    final ctrl = TextEditingController(text: _profile?.username ?? '');
+    String? error;
+    bool checking = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder:
+          (sheetCtx) => StatefulBuilder(
+            builder: (sheetCtx, setSheetState) {
+              Future<void> save() async {
+                final raw = ctrl.text;
+                final formatErr = ProfileService.validateUsername(raw);
+                if (formatErr != null) {
+                  setSheetState(() => error = formatErr);
+                  return;
+                }
+                setSheetState(() {
+                  error = null;
+                  checking = true;
+                });
+                try {
+                  final updated = await ProfileService.instance.updateUsername(
+                    raw,
+                  );
+                  if (!sheetCtx.mounted) return;
+                  Navigator.pop(sheetCtx);
+                  if (mounted) setState(() => _profile = updated);
+                } catch (e) {
+                  if (!sheetCtx.mounted) return;
+                  setSheetState(() {
+                    checking = false;
+                    error = e.toString().replaceFirst('Exception: ', '');
+                  });
+                }
+              }
+
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                  decoration: BoxDecoration(
+                    color: _bg,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                    border: Border.all(color: _surfaceLine, width: 1.5),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _creamFaint,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text('Modifier le pseudo', style: _arcade(size: 18)),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Ton pseudo est unique : c\'est lui qui permet à tes '
+                        'amis de te trouver sans confusion.',
+                        textAlign: TextAlign.center,
+                        style: _body(size: 12.5, color: _creamDim),
+                      ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: ctrl,
+                        autofocus: true,
+                        enabled: !checking,
+                        autocorrect: false,
+                        textCapitalization: TextCapitalization.none,
+                        style: _body(color: _cream),
+                        onChanged: (_) {
+                          if (error != null) setSheetState(() => error = null);
+                        },
+                        onSubmitted: (_) => save(),
+                        decoration: InputDecoration(
+                          prefixText: '@',
+                          prefixStyle: _body(color: _gold),
+                          hintText: 'ton_pseudo',
+                          hintStyle: _body(color: _creamFaint),
+                          errorText: error,
+                          errorStyle: _body(size: 12, color: _coral),
+                          helperText:
+                              '3 à 20 caractères · lettres, chiffres, _',
+                          helperStyle: _body(size: 11, color: _creamFaint),
+                          filled: true,
+                          fillColor: _cream.withValues(alpha: 0.06),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: _gold,
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _ArcadeButton(
+                        onTap: checking ? null : save,
+                        child: Text(checking ? 'VÉRIFICATION…' : 'ENREGISTRER'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
     );
   }
@@ -1205,10 +1339,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             const SizedBox(height: 8),
                             _accountTile(
                               icon: Icons.alternate_email_rounded,
-                              label: 'Identifiant',
+                              label: 'Pseudo (unique)',
                               value: '@${_profile?.username ?? ''}',
-                              onTap: null,
-                              showChevron: false,
+                              onTap: _showEditUsername,
+                              showChevron: true,
                             ),
                             const SizedBox(height: 8),
                             _accountTile(

@@ -1,6 +1,8 @@
 // daily_reward_card.dart
 // ════════════════════════════════════════════════════════════════════════════
-//  BANDEAU « RÉCOMPENSE DU JOUR » — à placer en haut de l'écran Collections.
+//  BANDEAU « RÉCOMPENSE DU JOUR » — à placer sur la page de détail d'une
+//  collection, à côté du bouton « Ouvrir le pack ». Un tirage par jour ET
+//  par collection.
 //  • Affiche la série (frise de 7 jours, le 7ᵉ = booster 📦)
 //  • Bouton RÉCLAMER quand c'est disponible, sinon un compte à rebours
 //  • À la réclamation : tire la/les carte(s) puis ouvre PackOpeningScreen
@@ -16,15 +18,15 @@ import 'daily_reward_service.dart';
 import 'pack_opening_screen.dart';
 
 class DailyRewardBanner extends StatefulWidget {
-  /// Collections de l'utilisateur (pour savoir où tirer la carte).
-  final List<CollectionModel> collections;
+  /// Collection dans laquelle la carte du jour sera tirée.
+  final CollectionModel collection;
 
-  /// Appelé après une réclamation réussie (ex. pour rafraîchir la liste).
+  /// Appelé après une réclamation réussie (ex. pour rafraîchir l'écran).
   final VoidCallback? onClaimed;
 
   const DailyRewardBanner({
     super.key,
-    required this.collections,
+    required this.collection,
     this.onClaimed,
   });
 
@@ -51,7 +53,7 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
   }
 
   Future<void> _load() async {
-    final st = await DailyRewardService.instance.status();
+    final st = await DailyRewardService.instance.status(widget.collection.id);
     if (!mounted) return;
     setState(() {
       _status = st;
@@ -85,40 +87,32 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
     if (_busy || st == null || !st.canClaim) return;
     setState(() => _busy = true);
     try {
-      final claimable = await DailyRewardService.instance.claimableCollections(
-        widget.collections,
+      final drawn = await DailyRewardService.instance.drawCards(
+        widget.collection.id,
+        st.nextCardCount,
       );
       if (!mounted) return;
-      if (claimable.isEmpty) {
+      if (drawn.isEmpty) {
         _snack(
-          'Ajoute des cartes à une collection pour réclamer ta carte du jour.',
+          'Ajoute des cartes à cette collection pour réclamer ta carte du jour.',
         );
         setState(() => _busy = false);
         return;
       }
 
-      final picked =
-          claimable.length == 1
-              ? claimable.first
-              : await _pickCollection(claimable);
-      if (picked == null) {
-        if (mounted) setState(() => _busy = false);
-        return; // annulé
-      }
-      final chosen = picked;
-
-      final drawn = await DailyRewardService.instance.drawCards(
-        chosen.id,
-        st.nextCardCount,
+      // ✅ CORRECTIF : on enregistre AVANT de consommer la réclamation.
+      // Avant, commitClaim brûlait la récompense du jour et la série, puis
+      // la sauvegarde arrivait à la fin de l'écran d'ouverture : si elle
+      // échouait, le joueur perdait sa carte ET sa journée.
+      // Maintenant, un échec laisse la réclamation intacte : il réessaie.
+      await CollectionService.instance.saveUserCards(
+        widget.collection.id,
+        drawn,
       );
-      if (!mounted) return;
-      if (drawn.isEmpty) {
-        _snack('Cette collection n\'a pas encore de cartes.');
-        setState(() => _busy = false);
-        return;
-      }
 
-      final result = await DailyRewardService.instance.commitClaim();
+      final result = await DailyRewardService.instance.commitClaim(
+        widget.collection.id,
+      );
       if (!mounted) return;
 
       await Navigator.push(
@@ -127,7 +121,9 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
           builder:
               (_) => PackOpeningScreen(
                 cards: drawn,
-                collectionId: chosen.id,
+                collectionId: widget.collection.id,
+                // Déjà enregistré ci-dessus.
+                saveCards: false,
                 packName: result.isBooster ? 'BOOSTER BONUS' : 'CARTE DU JOUR',
                 packSubtitle:
                     result.isBooster
@@ -145,89 +141,6 @@ class _DailyRewardBannerState extends State<DailyRewardBanner> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<CollectionModel?> _pickCollection(List<CollectionModel> cols) {
-    return showModalBottomSheet<CollectionModel>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder:
-          (_) => Container(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-            decoration: BoxDecoration(
-              color: Arcade.bg,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(26),
-              ),
-              border: Border.all(color: Arcade.line, width: 1.5),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Arcade.creamFaint,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text('Carte du jour pour…', style: Arcade.title(size: 18)),
-                const SizedBox(height: 6),
-                Text(
-                  'Choisis la collection à compléter',
-                  style: Arcade.body(color: Arcade.creamDim, size: 13),
-                ),
-                const SizedBox(height: 16),
-                ...cols.map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: GestureDetector(
-                      onTap: () => Navigator.pop(context, c),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Arcade.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Arcade.line, width: 1.5),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.auto_awesome_rounded,
-                              color: Arcade.gold,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                c.name,
-                                style: Arcade.body(
-                                  size: 15,
-                                  weight: FontWeight.w700,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const Icon(
-                              Icons.chevron_right_rounded,
-                              color: Arcade.creamFaint,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-    );
   }
 
   void _snack(String msg) {
