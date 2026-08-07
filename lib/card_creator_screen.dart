@@ -49,8 +49,13 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'card_layer.dart';
+import 'card_media_service.dart';
+import 'collection_service.dart';
 import 'color_picker_sheet.dart';
+import 'error_reporter.dart';
 import 'card_model.dart';
 import 'card_inspector_screen.dart';
 import 'card_storage.dart';
@@ -60,7 +65,36 @@ const double _kCardW = 274;
 const double _kCardH = 394;
 
 class CardCreatorScreen extends StatefulWidget {
-  const CardCreatorScreen({super.key});
+  /// ✨ Si renseigne, la carte est AUSSI rattachee a cette collection
+  /// (table `collection_cards`), et devient donc tirable au pack et visible
+  /// par tous les membres. Sinon la carte reste dans la galerie locale.
+  ///
+  /// C'est ce qui a permis de retirer l'ancien editeur embarque : les
+  /// collections utilisaient une version sans calques, sans stickers et
+  /// sans selecteur de couleur, uniquement parce qu'elle savait faire cet
+  /// enregistrement-la.
+  final String? collectionId;
+
+  /// Appele apres un enregistrement reussi (rafraichissement de l'appelant).
+  final VoidCallback? onSaved;
+
+  /// Insere dans un onglet plutot qu'ouvert en plein ecran : masque la
+  /// fleche de retour (il n'y a nulle part ou revenir).
+  final bool embedded;
+
+  /// ⚠️ INDISPENSABLE en mode embarque : signale qu'un element est en cours
+  /// de deplacement sur la carte. Le parent s'en sert pour geler son
+  /// defilement vertical ET le balayage entre onglets — sans quoi faire
+  /// glisser un element fait defiler la page au lieu de bouger l'element.
+  final ValueChanged<bool>? onMoveModeChanged;
+
+  const CardCreatorScreen({
+    super.key,
+    this.collectionId,
+    this.onSaved,
+    this.embedded = false,
+    this.onMoveModeChanged,
+  });
 
   @override
   State<CardCreatorScreen> createState() => _CardCreatorScreenState();
@@ -1265,6 +1299,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           setState(() => _selected = i);
           _gestureStartScale = l.scale;
           _gestureStartRotation = l.rotation;
+          // Gèle le défilement du parent pendant le déplacement.
+          widget.onMoveModeChanged?.call(true);
         },
         onScaleUpdate:
             (d) => setState(() {
@@ -1276,6 +1312,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                 l.rotation = _gestureStartRotation + d.rotation * 180 / pi;
               }
             }),
+        onScaleEnd: (_) => widget.onMoveModeChanged?.call(false),
         child: Transform.rotate(
           angle: l.rotation * pi / 180,
           child: Transform(
@@ -1878,15 +1915,79 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       frontColor: _frontColor,
       frameStyle: _frameStyle,
     );
-    await CardStorage.addCard(card);
-    if (!mounted) return;
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('✅ Carte sauvegardée !'),
-        backgroundColor: Color(0xFF4CAF50),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    // Sans collection : la carte reste dans la galerie locale.
+    if (widget.collectionId == null) {
+      await CardStorage.addCard(card);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('✅ Carte sauvegardée !'),
+          backgroundColor: Color(0xFF4CAF50),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      widget.onSaved?.call();
+      return;
+    }
+
+    // ── Enregistrement DANS une collection ────────────────────────────────
+    final colId = widget.collectionId!;
+    try {
+      // Images vers Supabase Storage. En cas d'echec (hors-ligne), la carte
+      // conserve son base64 : rien ne casse.
+      final uploaded = await CardMediaService.instance.uploadCardImages(card);
+      await CardStorage.addCard(uploaded);
+
+      bool supabaseOk = false;
+      try {
+        await CollectionService.instance.addCardToCollection(
+          colId,
+          uploaded.id,
+          uploaded.name,
+          _rarityLabel,
+          uploaded, // card_data : indispensable aux AUTRES membres
+        );
+        supabaseOk = true;
+      } catch (e) {
+        reportError(
+          'Ajout de la carte a la collection',
+          e,
+          level: ErrorLevel.dataLoss,
+        );
+      }
+
+      // Repli hors-ligne : on memorise l'id en local pour que la carte
+      // apparaisse quand meme dans le catalogue de l'appareil.
+      if (!supabaseOk) {
+        final prefs = await SharedPreferences.getInstance();
+        final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+        final key = 'local_cat_${uid}_$colId';
+        final existing = prefs.getStringList(key) ?? [];
+        existing.add(uploaded.id);
+        await prefs.setStringList(key, existing);
+      }
+
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            supabaseOk
+                ? '✅ Carte ajoutée à la collection !'
+                : '⚠️ Carte enregistrée sur l\'appareil uniquement.',
+          ),
+          backgroundColor:
+              supabaseOk ? const Color(0xFF4CAF50) : const Color(0xFFB26A00),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      widget.onSaved?.call();
+    } catch (e) {
+      reportError(
+        'Enregistrement de la carte',
+        e,
+        level: ErrorLevel.dataLoss,
+      );
+    }
   }
 
   // ────────────────────────────────────────────────────────
@@ -1899,9 +2000,12 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       backgroundColor: const Color(0xFF1A1A2E),
       appBar: AppBar(
         backgroundColor: const Color(0xFF16213E),
-        title: const Text(
-          'Créer une carte',
-          style: TextStyle(color: Colors.white),
+        // En mode embarqué, la barre sert de barre d'outils : pas de flèche
+        // de retour, sinon elle quitterait tout l'écran de collection.
+        automaticallyImplyLeading: !widget.embedded,
+        title: Text(
+          widget.embedded ? 'Nouvelle carte' : 'Créer une carte',
+          style: const TextStyle(color: Colors.white),
         ),
         actions: [
           IconButton(

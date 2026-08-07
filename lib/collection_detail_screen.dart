@@ -15,11 +15,9 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import 'dart:math' as math;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -34,13 +32,13 @@ import 'pack_customizer_screen.dart';
 import 'manage_members_screen.dart';
 import 'streak_service.dart';
 import 'daily_reward_card.dart';
+import 'card_creator_screen.dart';
 import 'error_reporter.dart';
 import 'pack_countdown.dart';
 import 'dev_tools.dart';
 
 // ✂️ Fichier decoupe : voir l'en-tete de chaque part.
 part 'collection_detail_card_tile.dart';
-part 'collection_detail_card_creator.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 //  TOKENS DE DESIGN
@@ -1857,12 +1855,15 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     ),
   );
 
-  Widget _createTab(List<Color> p) => _CardCreator(
-    palette: p,
+  // ✨ Editeur MODERNE (calques, stickers, contour/ombre, rotation,
+  // selecteur de couleur). Il remplace l'ancien _CardCreator, qui n'etait
+  // conserve que parce qu'il savait enregistrer dans une collection —
+  // CardCreatorScreen le fait desormais via `collectionId`.
+  Widget _createTab(List<Color> p) => CardCreatorScreen(
     collectionId: widget.collection.id,
+    embedded: true,
     onMoveModeChanged: (v) => setState(() => _cardMoveMode = v),
     onSaved: () {
-      _msg('✅ Carte ajoutée !');
       _loadCards();
       _tabCtrl.animateTo(1);
     },
@@ -1989,12 +1990,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     children: [
       _adminBackBar('Créer une carte'),
       Expanded(
-        child: _CardCreator(
-          palette: p,
+        child: CardCreatorScreen(
           collectionId: widget.collection.id,
+          embedded: true,
           onMoveModeChanged: (v) => setState(() => _cardMoveMode = v),
           onSaved: () {
-            _msg('✅ Carte ajoutée !');
             _loadCards();
             setState(() => _adminMode = 'menu');
             _tabCtrl.animateTo(1);
