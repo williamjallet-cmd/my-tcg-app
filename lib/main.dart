@@ -264,6 +264,19 @@ class TCGApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: _bgDeep,
         useMaterial3: true,
+        // ✨ POLICE PAR DÉFAUT DE TOUTE L'APP.
+        //
+        // Un `TextStyle` sans fontFamily hérite du thème (inherit: true par
+        // défaut). Sans cette ligne, la centaine de `TextStyle(color: …,
+        // fontSize: …)` disséminés dans les écrans retombaient sur Roboto,
+        // d'où des mots à la mauvaise police au milieu du reste.
+        //
+        // Plus Jakarta Sans = la police de corps de l'app (celle de _body).
+        // Les titres continuent d'utiliser Lilita One via _arcade / Arcade.title,
+        // et les petits libellés Silkscreen via _pixel / Arcade.pixel.
+        textTheme: GoogleFonts.plusJakartaSansTextTheme(
+          ThemeData(brightness: Brightness.dark).textTheme,
+        ),
       ),
       home: const _AuthGate(),
     );
