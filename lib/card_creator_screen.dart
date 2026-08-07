@@ -122,6 +122,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   int _frontColor = 0xFF1A1A2E;
   int _frameStyle = 0; // 0=aucun, 1=or, 2=argent, 3=néon, 4=pointillé
 
+  // ✨ Données de jeu (PV, élément, attaques…). Éditées ici, rendues sur la
+  // carte par « Appliquer le modèle » qui les transforme en couches.
+  final CardStats _stats = CardStats();
+
   static const List<IconData> _stickerIcons = [
     Icons.star,
     Icons.bolt,
@@ -1884,6 +1888,418 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
+  // ────────────────────────────────────────────────────────
+  //   MODÈLE — transforme les données de jeu en couches
+  // ────────────────────────────────────────────────────────
+
+  /// Identifiant unique pour une couche générée.
+  String _newLayerId() =>
+      '${DateTime.now().microsecondsSinceEpoch}_${_layers.length}';
+
+  /// Toutes les couches produites par le modèle portent ce préfixe dans leur
+  /// texte technique ? Non : on les repère via cette liste, mémorisée pour
+  /// pouvoir les remplacer proprement à chaque nouvelle application.
+  final Set<String> _templateLayerIds = {};
+
+  CardLayer _templateText(
+    String text, {
+    required double x,
+    required double y,
+    double size = 13,
+    int color = 0xFFFFFFFF,
+    bool bold = false,
+    bool italic = false,
+  }) {
+    final l = CardLayer(
+      id: _newLayerId(),
+      type: LayerType.text,
+      x: x,
+      y: y,
+      text: text,
+      fontSize: size,
+      color: color,
+      bold: bold,
+      italic: italic,
+      shadowOn: true,
+      shadowDx: 1,
+      shadowDy: 1,
+      shadowBlur: 3,
+    );
+    _templateLayerIds.add(l.id);
+    return l;
+  }
+
+  /// Génère (ou régénère) les couches de texte correspondant aux données de
+  /// jeu, positionnées comme sur une vraie carte à collectionner.
+  ///
+  /// Les couches précédemment produites par le modèle sont retirées d'abord :
+  /// on peut donc modifier les PV puis réappliquer sans accumuler de doublons.
+  /// ⚠️ Les couches créées à la main par l'utilisateur ne sont JAMAIS
+  /// touchées — seules celles dont l'id est dans _templateLayerIds partent.
+  void _applyTemplate() {
+    if (_stats.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Renseigne au moins les PV ou une attaque.'),
+          backgroundColor: Color(0xFFB26A00),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _layers.removeWhere((l) => _templateLayerIds.contains(l.id));
+      _templateLayerIds.clear();
+      _selected = -1;
+
+      final el = _stats.element;
+
+      // ── PV + élément, en haut à droite ──
+      if (_stats.hp != null) {
+        _layers.add(
+          _templateText(
+            el == CardElement.neutre
+                ? '${_stats.hp} PV'
+                : '${el.symbol} ${_stats.hp} PV',
+            x: _kCardW - 96,
+            y: 10,
+            size: 15,
+            bold: true,
+            color: el == CardElement.neutre ? 0xFFFFFFFF : el.color,
+          ),
+        );
+      }
+
+      // ── Attaques, sous l'illustration ──
+      double y = 250;
+      for (final a in _stats.attacks) {
+        if (a.name.trim().isEmpty) continue;
+        final cost = List.filled(a.cost.clamp(0, 4), el.symbol).join();
+        _layers.add(
+          _templateText(
+            '$cost ${a.name}'.trim(),
+            x: 12,
+            y: y,
+            size: 12.5,
+            bold: true,
+          ),
+        );
+        if (a.damage > 0) {
+          _layers.add(
+            _templateText(
+              '${a.damage}',
+              x: _kCardW - 46,
+              y: y,
+              size: 14,
+              bold: true,
+              color: el.color,
+            ),
+          );
+        }
+        y += 18;
+        if (a.effect.trim().isNotEmpty) {
+          _layers.add(
+            _templateText(
+              a.effect.trim(),
+              x: 12,
+              y: y,
+              size: 9.5,
+              color: 0xCCFFFFFF,
+            ),
+          );
+          y += 14;
+        }
+      }
+
+      // ── Texte d'ambiance ──
+      if (_stats.flavorText.trim().isNotEmpty) {
+        _layers.add(
+          _templateText(
+            '« ${_stats.flavorText.trim()} »',
+            x: 12,
+            y: y + 4,
+            size: 9.5,
+            italic: true,
+            color: 0xB3FFFFFF,
+          ),
+        );
+      }
+
+      // ── Faiblesse, tout en bas ──
+      if (_stats.weakness != null) {
+        _layers.add(
+          _templateText(
+            'Faiblesse ${_stats.weakness!.symbol}',
+            x: 12,
+            y: _kCardH - 26,
+            size: 9.5,
+            color: 0xCCFFFFFF,
+          ),
+        );
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✅ Modèle appliqué — tout reste déplaçable.'),
+        backgroundColor: Color(0xFF4CAF50),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ────────────────────────────────────────────────────────
+  //   SECTION « JEU » — PV, élément, attaques, ambiance
+  // ────────────────────────────────────────────────────────
+
+  InputDecoration _gameField(String label, {String? suffix}) => InputDecoration(
+    labelText: label,
+    suffixText: suffix,
+    labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+    suffixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+    isDense: true,
+    filled: true,
+    fillColor: const Color(0xFF16213E),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide.none,
+    ),
+  );
+
+  Widget _elementChips({
+    required CardElement? value,
+    required ValueChanged<CardElement?> onPick,
+    bool allowNone = false,
+  }) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      if (allowNone)
+        _pickChip(
+          label: 'Aucune',
+          selected: value == null,
+          color: 0xFF9E9E9E,
+          onTap: () => onPick(null),
+        ),
+      ...CardElement.values.map(
+        (e) => _pickChip(
+          label: '${e.symbol} ${e.label}',
+          selected: value == e,
+          color: e.color,
+          onTap: () => onPick(e),
+        ),
+      ),
+    ],
+  );
+
+  Widget _pickChip({
+    required String label,
+    required bool selected,
+    required int color,
+    required VoidCallback onTap,
+  }) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? Color(color).withValues(alpha: 0.25) : const Color(0xFF16213E),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(
+          color: selected ? Color(color) : Colors.white24,
+          width: selected ? 1.6 : 1,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? Color(color) : Colors.white70,
+          fontSize: 12,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    ),
+  );
+
+  List<Widget> _buildGameSection() => [
+    _buildSectionLabel('Jeu'),
+    const SizedBox(height: 4),
+    const Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Facultatif. « Appliquer le modèle » place ces informations sur la '
+        'carte ; elles restent ensuite déplaçables comme n\'importe quel '
+        'élément.',
+        style: TextStyle(color: Colors.white38, fontSize: 11.5),
+      ),
+    ),
+    const SizedBox(height: 12),
+
+    // PV
+    SizedBox(
+      width: 150,
+      child: TextFormField(
+        initialValue: _stats.hp?.toString() ?? '',
+        keyboardType: TextInputType.number,
+        style: const TextStyle(color: Colors.white),
+        decoration: _gameField('Points de vie', suffix: 'PV'),
+        onChanged: (v) => _stats.hp = int.tryParse(v.trim()),
+      ),
+    ),
+    const SizedBox(height: 14),
+
+    const Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Élément',
+        style: TextStyle(color: Colors.white70, fontSize: 13),
+      ),
+    ),
+    const SizedBox(height: 6),
+    _elementChips(
+      value: _stats.element,
+      onPick: (e) => setState(() => _stats.element = e ?? CardElement.neutre),
+    ),
+    const SizedBox(height: 14),
+
+    const Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Faiblesse',
+        style: TextStyle(color: Colors.white70, fontSize: 13),
+      ),
+    ),
+    const SizedBox(height: 6),
+    _elementChips(
+      value: _stats.weakness,
+      allowNone: true,
+      onPick: (e) => setState(() => _stats.weakness = e),
+    ),
+    const SizedBox(height: 16),
+
+    // Attaques
+    Row(
+      children: [
+        const Expanded(
+          child: Text(
+            'Attaques',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ),
+        if (_stats.attacks.length < 3)
+          TextButton.icon(
+            onPressed:
+                () => setState(() => _stats.attacks.add(CardAttack())),
+            icon: const Icon(Icons.add, size: 16, color: Color(0xFF6C4AB6)),
+            label: const Text(
+              'Ajouter',
+              style: TextStyle(color: Color(0xFF6C4AB6), fontSize: 12),
+            ),
+          ),
+      ],
+    ),
+    for (int i = 0; i < _stats.attacks.length; i++) ...[
+      _attackEditor(i),
+      const SizedBox(height: 10),
+    ],
+    const SizedBox(height: 4),
+
+    // Texte d'ambiance
+    TextFormField(
+      initialValue: _stats.flavorText,
+      maxLines: 2,
+      style: const TextStyle(color: Colors.white),
+      decoration: _gameField('Texte d\'ambiance'),
+      onChanged: (v) => _stats.flavorText = v,
+    ),
+    const SizedBox(height: 14),
+
+    SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _applyTemplate,
+        icon: const Icon(Icons.auto_fix_high, size: 18),
+        label: const Text('Appliquer le modèle'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF6C4AB6),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    ),
+  ];
+
+  Widget _attackEditor(int i) {
+    final a = _stats.attacks[i];
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: a.name,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _gameField('Nom de l\'attaque'),
+                  onChanged: (v) => a.name = v,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Supprimer',
+                onPressed: () => setState(() => _stats.attacks.removeAt(i)),
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xFFFF5D73),
+                  size: 20,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: a.cost.toString(),
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _gameField('Coût', suffix: '⚡'),
+                  onChanged:
+                      (v) => a.cost = (int.tryParse(v.trim()) ?? 0).clamp(0, 4),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextFormField(
+                  initialValue: a.damage.toString(),
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _gameField('Dégâts'),
+                  onChanged: (v) => a.damage = int.tryParse(v.trim()) ?? 0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextFormField(
+            initialValue: a.effect,
+            style: const TextStyle(color: Colors.white),
+            decoration: _gameField('Effet (facultatif)'),
+            onChanged: (v) => a.effect = v,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSectionLabel(String label) => Align(
     alignment: Alignment.centerLeft,
     child: Text(
@@ -1910,6 +2326,9 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           }).toList(),
       rarity: _rarity,
       effect: _effect,
+      // Copie : la carte enregistrée ne doit pas partager l'objet mutable
+      // que l'éditeur continue de modifier après la sauvegarde.
+      stats: _stats.copy(),
       backImageBytes: _backImageBytes,
       backColor: _backColor,
       frontColor: _frontColor,
@@ -2284,6 +2703,8 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                         ),
                       ],
                     ),
+                    const SizedBox(height: 24),
+                    ..._buildGameSection(),
                     const SizedBox(height: 24),
                     // ✨ Bloc 4 : fond du recto
                     _buildSectionLabel('Fond'),

@@ -27,7 +27,11 @@
       "Bash(nslookup wmdtcjiitbkskvumzbdj.supabase.co)",
       "Bash(awk 'NR>=69 && NR<=2503' lib/card_creator_screen.dart)",
       "Bash(sort -t: -k2 -rn)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "WebFetch(domain:pokecardmaker.net)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.oreateai.com)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"

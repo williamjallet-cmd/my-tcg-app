@@ -95,11 +95,17 @@ class SavedCard {
   final String? imagePath;
   final String? backImagePath;
 
+  /// ✨ Données de jeu (PV, élément, attaques…). Jamais null : une carte sans
+  /// données porte un CardStats vide, ce qui evite les tests de nullité
+  /// partout dans le rendu.
+  final CardStats stats;
+
   SavedCard({
     required this.id,
     required this.name,
     this.rarity = Rarity.common,
     this.effect = CardEffect.none,
+    CardStats? stats,
     List<CardLayer>? layers,
     this.imageBytes,
     this.imageX = 0,
@@ -118,6 +124,7 @@ class SavedCard {
     this.rarityY = 222,
     List<TextZone>? textZones,
   }) : layers = layers ?? [],
+       stats = stats ?? CardStats(),
        extraImages = extraImages ?? [],
        textZones = textZones ?? [];
 
@@ -154,6 +161,7 @@ class SavedCard {
     int frontColor = 0xFF1A1A2E,
     int frameStyle = 0,
     String? backImagePath,
+    CardStats? stats,
   }) {
     Uint8List? mainBytes;
     String? mainPath;
@@ -215,6 +223,7 @@ class SavedCard {
       name: name,
       rarity: rarity,
       effect: effect,
+      stats: stats,
       layers: layers,
       imageBytes: mainBytes,
       imagePath: mainPath,
@@ -243,11 +252,13 @@ class SavedCard {
     String? backImagePath,
     List<ExtraImage>? extraImages,
     List<CardLayer>? layers,
+    CardStats? stats,
   }) => SavedCard(
     id: id,
     name: name,
     rarity: rarity,
     effect: effect,
+    stats: stats ?? this.stats,
     layers: layers ?? this.layers,
     imageBytes: imageBytes ?? this.imageBytes,
     imageX: imageX,
@@ -347,6 +358,7 @@ class CardStorage {
     'name': c.name,
     'rarity': c.rarity.index,
     'effect': c.effect.index,
+    'stats': c.stats.toJson(),
     'layers': c.layers.map((l) => l.toJson(includeBytes: true)).toList(),
     'imagePath': c.imagePath,
     'imageBytes':
@@ -434,6 +446,7 @@ class CardStorage {
       name: j['name'] as String,
       rarity: Rarity.values[j['rarity'] as int],
       effect: CardEffect.values[j['effect'] as int],
+      stats: CardStats.fromJson(j['stats'] as Map<String, dynamic>?),
       layers: layers,
       imageBytes: imageBytes,
       imagePath: j['imagePath'] as String?,
@@ -464,6 +477,7 @@ class CardStorage {
     'name': c.name,
     'rarity': c.rarity.index,
     'effect': c.effect.index,
+    'stats': c.stats.toJson(),
     'layers': c.layers.map((l) => l.toJson(includeBytes: false)).toList(),
     'imageX': c.imageX,
     'imageY': c.imageY,
@@ -585,6 +599,7 @@ class CardStorage {
       name: j['name'] as String,
       rarity: Rarity.values[j['rarity'] as int],
       effect: CardEffect.values[j['effect'] as int],
+      stats: CardStats.fromJson(j['stats'] as Map<String, dynamic>?),
       layers: layers,
       imageBytes: main,
       imageX: (j['imageX'] as num?)?.toDouble() ?? 0,
