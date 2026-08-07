@@ -24,7 +24,8 @@
       "Bash(git merge --no-ff wip/communaute-recompense-et-corrections -m ' *)",
       "Bash(git commit -m 'Autorisation locale pour la fusion *)",
       "Bash(python -m py_compile add_to_catalogue.py migrate_v1_to_v2.py)",
-      "Bash(nslookup wmdtcjiitbkskvumzbdj.supabase.co)"
+      "Bash(nslookup wmdtcjiitbkskvumzbdj.supabase.co)",
+      "Bash(awk 'NR>=69 && NR<=2503' lib/card_creator_screen.dart)"
     ],
     "additionalDirectories": [
       "c:\\Users\\willi\\tcg_app\\lib"
