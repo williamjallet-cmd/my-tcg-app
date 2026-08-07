@@ -1892,16 +1892,20 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   //   MODÈLE — transforme les données de jeu en couches
   // ────────────────────────────────────────────────────────
 
-  /// Identifiant unique pour une couche générée.
-  String _newLayerId() =>
-      '${DateTime.now().microsecondsSinceEpoch}_${_layers.length}';
+  /// Les couches du modèle ont un id STABLE (« tpl_hp », « tpl_atk0_name »…).
+  ///
+  /// C'est ce qui permet de rafraîchir l'aperçu à chaque frappe SANS effacer
+  /// les déplacements de l'utilisateur : si la couche existe déjà, on met à
+  /// jour son texte et sa couleur en gardant sa position ; sinon on la crée.
+  static const _tplPrefix = 'tpl_';
 
-  /// Toutes les couches produites par le modèle portent ce préfixe dans leur
-  /// texte technique ? Non : on les repère via cette liste, mémorisée pour
-  /// pouvoir les remplacer proprement à chaque nouvelle application.
+  /// Ids produits lors de la dernière synchronisation — sert à supprimer les
+  /// couches devenues inutiles (attaque effacée, PV vidés…).
   final Set<String> _templateLayerIds = {};
 
-  CardLayer _templateText(
+  /// Crée ou met à jour la couche `id`. Renvoie true si elle existait déjà.
+  void _upsertTemplateText(
+    String id,
     String text, {
     required double x,
     required double y,
@@ -1909,24 +1913,40 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     int color = 0xFFFFFFFF,
     bool bold = false,
     bool italic = false,
+    bool resetPosition = false,
   }) {
-    final l = CardLayer(
-      id: _newLayerId(),
-      type: LayerType.text,
-      x: x,
-      y: y,
-      text: text,
-      fontSize: size,
-      color: color,
-      bold: bold,
-      italic: italic,
-      shadowOn: true,
-      shadowDx: 1,
-      shadowDy: 1,
-      shadowBlur: 3,
+    _templateLayerIds.add(id);
+    final existing = _layers.indexWhere((l) => l.id == id);
+    if (existing >= 0) {
+      final l = _layers[existing];
+      l.text = text;
+      l.fontSize = size;
+      l.color = color;
+      l.bold = bold;
+      l.italic = italic;
+      if (resetPosition) {
+        l.x = x;
+        l.y = y;
+      }
+      return;
+    }
+    _layers.add(
+      CardLayer(
+        id: id,
+        type: LayerType.text,
+        x: x,
+        y: y,
+        text: text,
+        fontSize: size,
+        color: color,
+        bold: bold,
+        italic: italic,
+        shadowOn: true,
+        shadowDx: 1,
+        shadowDy: 1,
+        shadowBlur: 3,
+      ),
     );
-    _templateLayerIds.add(l.id);
-    return l;
   }
 
   /// Génère (ou régénère) les couches de texte correspondant aux données de
@@ -1936,76 +1956,102 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   /// on peut donc modifier les PV puis réappliquer sans accumuler de doublons.
   /// ⚠️ Les couches créées à la main par l'utilisateur ne sont JAMAIS
   /// touchées — seules celles dont l'id est dans _templateLayerIds partent.
-  void _applyTemplate() {
-    if (_stats.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Renseigne au moins les PV ou une attaque.'),
-          backgroundColor: Color(0xFFB26A00),
-        ),
-      );
-      return;
-    }
-
+  /// Met l'aperçu en accord avec les données de jeu.
+  ///
+  /// Appelé à CHAQUE modification (frappe, choix d'élément…) : le retour
+  /// visuel est immédiat, sans avoir à valider quoi que ce soit.
+  /// [resetPositions] remet les éléments à leur place d'origine — réservé au
+  /// bouton « Réinitialiser la disposition ».
+  void _applyTemplate({bool resetPositions = false}) {
     setState(() {
-      _layers.removeWhere((l) => _templateLayerIds.contains(l.id));
-      _templateLayerIds.clear();
-      _selected = -1;
-
+      final produced = <String>{};
       final el = _stats.element;
+
+      void put(
+        String id,
+        String text, {
+        required double x,
+        required double y,
+        double size = 13,
+        int color = 0xFFFFFFFF,
+        bool bold = false,
+        bool italic = false,
+      }) {
+        produced.add(id);
+        _upsertTemplateText(
+          id,
+          text,
+          x: x,
+          y: y,
+          size: size,
+          color: color,
+          bold: bold,
+          italic: italic,
+          resetPosition: resetPositions,
+        );
+      }
 
       // ── PV + élément, en haut à droite ──
       if (_stats.hp != null) {
-        _layers.add(
-          _templateText(
-            el == CardElement.neutre
-                ? '${_stats.hp} PV'
-                : '${el.symbol} ${_stats.hp} PV',
-            x: _kCardW - 96,
-            y: 10,
-            size: 15,
-            bold: true,
-            color: el == CardElement.neutre ? 0xFFFFFFFF : el.color,
-          ),
+        put(
+          '${_tplPrefix}hp',
+          el == CardElement.neutre
+              ? '${_stats.hp} PV'
+              : '${el.symbol} ${_stats.hp} PV',
+          x: _kCardW - 96,
+          y: 10,
+          size: 15,
+          bold: true,
+          color: el == CardElement.neutre ? 0xFFFFFFFF : el.color,
+        );
+      } else if (el != CardElement.neutre) {
+        // Élément choisi sans PV : on affiche quand même le symbole, sinon
+        // cliquer « Feu » ne produirait aucun retour visuel.
+        put(
+          '${_tplPrefix}hp',
+          el.symbol,
+          x: _kCardW - 46,
+          y: 10,
+          size: 18,
+          bold: true,
+          color: el.color,
         );
       }
 
       // ── Attaques, sous l'illustration ──
       double y = 250;
-      for (final a in _stats.attacks) {
+      for (int i = 0; i < _stats.attacks.length; i++) {
+        final a = _stats.attacks[i];
         if (a.name.trim().isEmpty) continue;
         final cost = List.filled(a.cost.clamp(0, 4), el.symbol).join();
-        _layers.add(
-          _templateText(
-            '$cost ${a.name}'.trim(),
-            x: 12,
-            y: y,
-            size: 12.5,
-            bold: true,
-          ),
+        put(
+          '${_tplPrefix}atk${i}_name',
+          '$cost ${a.name}'.trim(),
+          x: 12,
+          y: y,
+          size: 12.5,
+          bold: true,
         );
         if (a.damage > 0) {
-          _layers.add(
-            _templateText(
-              '${a.damage}',
-              x: _kCardW - 46,
-              y: y,
-              size: 14,
-              bold: true,
-              color: el.color,
-            ),
+          put(
+            '${_tplPrefix}atk${i}_dmg',
+            '${a.damage}',
+            x: _kCardW - 46,
+            y: y,
+            size: 14,
+            bold: true,
+            color: el.color,
           );
         }
         y += 18;
         if (a.effect.trim().isNotEmpty) {
-          _layers.add(
-            _templateText(
-              a.effect.trim(),
-              x: 12,
-              y: y,
-              size: 9.5,
-              color: 0xCCFFFFFF,
-            ),
+          put(
+            '${_tplPrefix}atk${i}_fx',
+            a.effect.trim(),
+            x: 12,
+            y: y,
+            size: 9.5,
+            color: 0xCCFFFFFF,
           );
           y += 14;
         }
@@ -2013,39 +2059,37 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
 
       // ── Texte d'ambiance ──
       if (_stats.flavorText.trim().isNotEmpty) {
-        _layers.add(
-          _templateText(
-            '« ${_stats.flavorText.trim()} »',
-            x: 12,
-            y: y + 4,
-            size: 9.5,
-            italic: true,
-            color: 0xB3FFFFFF,
-          ),
+        put(
+          '${_tplPrefix}flavor',
+          '« ${_stats.flavorText.trim()} »',
+          x: 12,
+          y: y + 4,
+          size: 9.5,
+          italic: true,
+          color: 0xB3FFFFFF,
         );
       }
 
       // ── Faiblesse, tout en bas ──
       if (_stats.weakness != null) {
-        _layers.add(
-          _templateText(
-            'Faiblesse ${_stats.weakness!.symbol}',
-            x: 12,
-            y: _kCardH - 26,
-            size: 9.5,
-            color: 0xCCFFFFFF,
-          ),
+        put(
+          '${_tplPrefix}weak',
+          'Faiblesse ${_stats.weakness!.symbol}',
+          x: 12,
+          y: _kCardH - 26,
+          size: 9.5,
+          color: 0xCCFFFFFF,
         );
       }
-    });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('✅ Modèle appliqué — tout reste déplaçable.'),
-        backgroundColor: Color(0xFF4CAF50),
-        duration: Duration(seconds: 2),
-      ),
-    );
+      // Couches du modèle devenues inutiles (attaque supprimée, PV vidés…).
+      final stale = _templateLayerIds.difference(produced);
+      if (stale.isNotEmpty) {
+        _layers.removeWhere((l) => stale.contains(l.id));
+        _templateLayerIds.removeAll(stale);
+        _selected = -1;
+      }
+    });
   }
 
   // ────────────────────────────────────────────────────────
@@ -2142,7 +2186,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         keyboardType: TextInputType.number,
         style: const TextStyle(color: Colors.white),
         decoration: _gameField('Points de vie', suffix: 'PV'),
-        onChanged: (v) => _stats.hp = int.tryParse(v.trim()),
+        onChanged: (v) {
+          _stats.hp = int.tryParse(v.trim());
+          _applyTemplate();
+        },
       ),
     ),
     const SizedBox(height: 14),
@@ -2157,7 +2204,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     const SizedBox(height: 6),
     _elementChips(
       value: _stats.element,
-      onPick: (e) => setState(() => _stats.element = e ?? CardElement.neutre),
+      onPick: (e) {
+        _stats.element = e ?? CardElement.neutre;
+        _applyTemplate();
+      },
     ),
     const SizedBox(height: 14),
 
@@ -2172,7 +2222,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     _elementChips(
       value: _stats.weakness,
       allowNone: true,
-      onPick: (e) => setState(() => _stats.weakness = e),
+      onPick: (e) {
+        _stats.weakness = e;
+        _applyTemplate();
+      },
     ),
     const SizedBox(height: 16),
 
@@ -2187,8 +2240,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         ),
         if (_stats.attacks.length < 3)
           TextButton.icon(
-            onPressed:
-                () => setState(() => _stats.attacks.add(CardAttack())),
+            onPressed: () {
+              _stats.attacks.add(CardAttack());
+              _applyTemplate();
+            },
             icon: const Icon(Icons.add, size: 16, color: Color(0xFF6C4AB6)),
             label: const Text(
               'Ajouter',
@@ -2209,16 +2264,19 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       maxLines: 2,
       style: const TextStyle(color: Colors.white),
       decoration: _gameField('Texte d\'ambiance'),
-      onChanged: (v) => _stats.flavorText = v,
+      onChanged: (v) {
+        _stats.flavorText = v;
+        _applyTemplate();
+      },
     ),
     const SizedBox(height: 14),
 
     SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: _applyTemplate,
+        onPressed: () => _applyTemplate(resetPositions: true),
         icon: const Icon(Icons.auto_fix_high, size: 18),
-        label: const Text('Appliquer le modèle'),
+        label: const Text('Réinitialiser la disposition'),
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF6C4AB6),
           foregroundColor: Colors.white,
@@ -2249,12 +2307,18 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   initialValue: a.name,
                   style: const TextStyle(color: Colors.white),
                   decoration: _gameField('Nom de l\'attaque'),
-                  onChanged: (v) => a.name = v,
+                  onChanged: (v) {
+                    a.name = v;
+                    _applyTemplate();
+                  },
                 ),
               ),
               IconButton(
                 tooltip: 'Supprimer',
-                onPressed: () => setState(() => _stats.attacks.removeAt(i)),
+                onPressed: () {
+                  _stats.attacks.removeAt(i);
+                  _applyTemplate();
+                },
                 icon: const Icon(
                   Icons.delete_outline,
                   color: Color(0xFFFF5D73),
@@ -2272,8 +2336,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: Colors.white),
                   decoration: _gameField('Coût', suffix: '⚡'),
-                  onChanged:
-                      (v) => a.cost = (int.tryParse(v.trim()) ?? 0).clamp(0, 4),
+                  onChanged: (v) {
+                    a.cost = (int.tryParse(v.trim()) ?? 0).clamp(0, 4);
+                    _applyTemplate();
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -2283,7 +2349,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: Colors.white),
                   decoration: _gameField('Dégâts'),
-                  onChanged: (v) => a.damage = int.tryParse(v.trim()) ?? 0,
+                  onChanged: (v) {
+                    a.damage = int.tryParse(v.trim()) ?? 0;
+                    _applyTemplate();
+                  },
                 ),
               ),
             ],
@@ -2293,7 +2362,10 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
             initialValue: a.effect,
             style: const TextStyle(color: Colors.white),
             decoration: _gameField('Effet (facultatif)'),
-            onChanged: (v) => a.effect = v,
+            onChanged: (v) {
+              a.effect = v;
+              _applyTemplate();
+            },
           ),
         ],
       ),
