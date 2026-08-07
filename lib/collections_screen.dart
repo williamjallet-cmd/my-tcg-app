@@ -37,6 +37,10 @@ class _CollectionsScreenState extends State<CollectionsScreen>
   final _service = CollectionService.instance;
   List<CollectionModel> _collections = [];
   bool _loading = true;
+  /// Distingue « pas de collection » de « chargement échoué » — voir
+  /// _emptyState : afficher « Crée ta première collection » après une
+  /// coupure réseau laisse croire que tout a disparu.
+  bool _loadFailed = false;
   String? _myUserId;
   late AnimationController _fabAnim;
 
@@ -57,7 +61,10 @@ class _CollectionsScreenState extends State<CollectionsScreen>
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
     try {
       _myUserId = _service.userId;
       _collections = await _service.getMyCollections();
@@ -65,7 +72,10 @@ class _CollectionsScreenState extends State<CollectionsScreen>
         await PackSystem.syncFromSupabase(col.id);
       }
     } catch (e) {
-      _showMsg('Erreur : $e', error: true);
+      // On NE vide PAS _collections : en cas d'échec réseau, mieux vaut
+      // garder à l'écran ce qui avait déjà été chargé.
+      _loadFailed = true;
+      _showMsg('Connexion impossible : $e', error: true);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -335,22 +345,60 @@ class _CollectionsScreenState extends State<CollectionsScreen>
     );
   }
 
-  Widget _emptyState() => Center(
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text('👾', style: TextStyle(fontSize: 72)),
-        const SizedBox(height: 20),
-        Text('Aucune collection', style: Arcade.title(size: 22)),
-        const SizedBox(height: 10),
-        Text(
-          'Crée ta première collection\nou rejoins celle d\'un ami !',
-          textAlign: TextAlign.center,
-          style: Arcade.body(color: Arcade.creamFaint, size: 15, height: 1.6),
+  /// ⚠️ « Aucune collection » et « chargement impossible » sont DEUX choses
+  /// différentes. Afficher « Crée ta première collection » après un simple
+  /// échec réseau donne l'impression que tout a été effacé — un message
+  /// particulièrement anxiogène quand on a déjà perdu des données.
+  Widget _emptyState() {
+    if (_loadFailed) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('📡', style: TextStyle(fontSize: 64)),
+              const SizedBox(height: 20),
+              Text('Connexion impossible', style: Arcade.title(size: 22)),
+              const SizedBox(height: 10),
+              Text(
+                'Tes collections n\'ont pas pu être chargées.\n'
+                'Rien n\'est perdu — vérifie ta connexion puis réessaie.',
+                textAlign: TextAlign.center,
+                style: Arcade.body(
+                  color: Arcade.creamFaint,
+                  size: 15,
+                  height: 1.6,
+                ),
+              ),
+              const SizedBox(height: 22),
+              ArcadeButton(
+                label: 'RÉESSAYER',
+                icon: Icons.refresh_rounded,
+                onTap: _load,
+              ),
+            ],
+          ),
         ),
-      ],
-    ),
-  );
+      );
+    }
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('👾', style: TextStyle(fontSize: 72)),
+          const SizedBox(height: 20),
+          Text('Aucune collection', style: Arcade.title(size: 22)),
+          const SizedBox(height: 10),
+          Text(
+            'Crée ta première collection\nou rejoins celle d\'un ami !',
+            textAlign: TextAlign.center,
+            style: Arcade.body(color: Arcade.creamFaint, size: 15, height: 1.6),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showShareSheet(CollectionModel col) {
     showModalBottomSheet(
