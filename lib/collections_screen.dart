@@ -404,7 +404,10 @@ class _CollectionCardState extends State<_CollectionCard> {
         cooldownHours: widget.collection.packCooldownHours,
       ),
       CollectionService.instance.getMemberCount(widget.collection.id),
-      CollectionService.instance.getCollectionCardIds(widget.collection.id),
+      // Lecture seule (compteur) : un échec ne doit pas casser la vignette.
+      CollectionService.instance.getCollectionCardIdsOrEmpty(
+        widget.collection.id,
+      ),
       CollectionService.instance.getMyOwnedCardIds(widget.collection.id),
       CardStorage.loadCards(),
     ]);

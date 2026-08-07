@@ -202,6 +202,47 @@ class _DevPanelState extends State<DevPanel> {
   bool _busy = false;
   String? _status;
 
+  /// ⚠️ Confirmation OBLIGATOIRE pour toute action destructrice.
+  ///
+  /// Sans elle, « Vider ma collection » supprimait instantanément toutes les
+  /// cartes du joueur sur le serveur, au moindre appui — au milieu de boutons
+  /// d'apparence identique et inoffensifs. C'est arrivé pour de vrai.
+  Future<bool> _confirmDestructive(String title, String consequence) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF211A33),
+            title: Text(
+              '⚠️ $title',
+              style: const TextStyle(color: _coral, fontSize: 17),
+            ),
+            content: Text(
+              '$consequence\n\nCette action est IRRÉVERSIBLE et s\'applique '
+              'directement au serveur.',
+              style: const TextStyle(color: _cream, fontSize: 13.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  'Annuler',
+                  style: TextStyle(color: _cream),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Supprimer',
+                  style: TextStyle(color: _coral),
+                ),
+              ),
+            ],
+          ),
+    );
+    return ok == true;
+  }
+
   Future<void> _run(String label, Future<void> Function() action) async {
     if (_busy) return;
     setState(() {
@@ -362,8 +403,16 @@ class _DevPanelState extends State<DevPanel> {
                   'Supprime toutes MES cartes : dex vide, badges NEW '
                   'réarmés. Le catalogue et les autres membres ne bougent pas.',
               color: _coral,
-              onTap:
-                  () => _run('Collection vidée', () => DevTools.wipeMyCards(id)),
+              onTap: () async {
+                if (!await _confirmDestructive(
+                  'Vider ma collection ?',
+                  'TOUTES tes cartes de cette collection seront supprimées '
+                      'du serveur. Ta progression sera perdue.',
+                )) {
+                  return;
+                }
+                await _run('Collection vidée', () => DevTools.wipeMyCards(id));
+              },
             ),
 
             if (_busy)

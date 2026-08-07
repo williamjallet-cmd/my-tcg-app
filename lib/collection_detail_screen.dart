@@ -34,6 +34,7 @@ import 'pack_customizer_screen.dart';
 import 'manage_members_screen.dart';
 import 'streak_service.dart';
 import 'daily_reward_card.dart';
+import 'error_reporter.dart';
 import 'pack_countdown.dart';
 import 'dev_tools.dart';
 
@@ -649,19 +650,42 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       // ✅ PERF : on ne demande que les IDENTIFIANTS du catalogue.
       // Le card_data (JSON des calques, parfois une image en base64) n'est
       // réclamé qu'ensuite, pour les seules cartes manquantes.
+      // ⚠️ getCollectionCardIds LÈVE si la lecture échoue : le `catch` en bas
+      // saute alors toute la purge. Un échec réseau ne doit JAMAIS être
+      // interprété comme « le catalogue est vide ».
       final serverIds =
           (await CollectionService.instance.getCollectionCardIds(
             widget.collection.id,
           )).toSet();
-      final removedIds = catIds.difference(serverIds);
-      for (final id in removedIds) {
-        await CardStorage.deleteCard(id);
-        all.removeWhere((c) => c.id == id);
-        obtIds.remove(id);
+
+      // ⚠️ GARDE-FOU : on ne purge jamais sur un catalogue vide.
+      // Une réponse vide alors qu'on a des cartes en local est presque
+      // toujours une anomalie (droits RLS, mauvaise collection, réponse
+      // tronquée) — jamais une vraie suppression de TOUTES les cartes.
+      // Sans ce garde-fou, ce bloc a déjà effacé l'intégralité des cartes
+      // du téléphone. Le coût d'un faux négatif (une carte supprimée qui
+      // reste visible jusqu'au prochain chargement) est sans commune
+      // mesure avec celui d'une perte totale.
+      if (serverIds.isEmpty && catIds.isNotEmpty) {
+        reportError(
+          'Catalogue vide alors que ${catIds.length} cartes sont en local — '
+          'purge annulée par sécurité',
+          'Réponse serveur vide inattendue',
+        );
+      } else {
+        final removedIds = catIds.difference(serverIds);
+        for (final id in removedIds) {
+          await CardStorage.deleteCard(id);
+          all.removeWhere((c) => c.id == id);
+          obtIds.remove(id);
+        }
+        // Uniquement ici : écraser catIds avec une réponse vide effacerait
+        // aussi le catalogue local, et ferait disparaître les cartes de
+        // l'affichage même sans suppression de fichiers.
+        catIds
+          ..clear()
+          ..addAll(serverIds);
       }
-      catIds
-        ..clear()
-        ..addAll(serverIds);
       await prefs.setStringList(_obtKey(widget.collection.id), obtIds.toList());
 
       // ✨ NOUVEAU : reconstruit les cartes créées par les AUTRES membres

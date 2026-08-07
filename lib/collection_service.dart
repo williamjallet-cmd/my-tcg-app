@@ -509,13 +509,27 @@ class CollectionService {
     }
   }
 
+  /// ⚠️ LÈVE une exception en cas d'échec — NE RENVOIE JAMAIS une liste vide
+  /// pour signaler une erreur.
+  ///
+  /// Pourquoi c'est vital : l'appelant compare cette liste au catalogue
+  /// local et SUPPRIME du téléphone toute carte absente. Avec l'ancien
+  /// `return []` en cas d'erreur, une simple coupure réseau faisait croire
+  /// que le catalogue était vide → TOUTES les cartes locales étaient
+  /// effacées. Un échec doit rester un échec, pas devenir « zéro carte ».
   Future<List<String>> getCollectionCardIds(String collectionId) async {
+    final res = await _db
+        .from('collection_cards')
+        .select('card_id')
+        .eq('collection_id', collectionId);
+    return (res as List).map((r) => r['card_id'] as String).toList();
+  }
+
+  /// Variante tolérante, pour les usages en LECTURE SEULE (affichage d'un
+  /// compteur…) où un échec ne doit rien détruire ni bloquer l'écran.
+  Future<List<String>> getCollectionCardIdsOrEmpty(String collectionId) async {
     try {
-      final res = await _db
-          .from('collection_cards')
-          .select('card_id')
-          .eq('collection_id', collectionId);
-      return (res as List).map((r) => r['card_id'] as String).toList();
+      return await getCollectionCardIds(collectionId);
     } catch (e) {
       reportError('Chargement du catalogue', e);
       return [];

@@ -163,7 +163,9 @@ class DailyRewardService {
     final ids = <String>{...(prefs.getStringList(_catKey(collectionId)) ?? [])};
     try {
       ids.addAll(
-        await CollectionService.instance.getCollectionCardIds(collectionId),
+        await CollectionService.instance.getCollectionCardIdsOrEmpty(
+          collectionId,
+        ),
       );
     } catch (e) {
       // Repli sur le catalogue local : le tirage reste possible, mais
