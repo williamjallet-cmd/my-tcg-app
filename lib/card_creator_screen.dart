@@ -1664,6 +1664,173 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   //   PILULE D'ACTIONS + SLIDERS (élément sélectionné)
   // ────────────────────────────────────────────────────────
 
+  /// Bouton de pilule AVEC libellé — pour l'action qui ouvre un sous-menu :
+  /// une icône seule n'aurait rien annoncé.
+  Widget _pillLabelled(IconData icon, String label, VoidCallback onTap) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(99),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 19, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _pillDivider() => Container(
+    width: 1,
+    height: 22,
+    margin: const EdgeInsets.symmetric(horizontal: 4),
+    color: Colors.white12,
+  );
+
+  /// Feuille « Ajuster » : transformations moins fréquentes, chacune avec
+  /// son nom en clair. Elle reste ouverte pendant les réglages — on enchaîne
+  /// souvent plusieurs rotations ou changements de plan.
+  void _openTransformSheet(CardLayer l) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF16213E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder:
+          (sheetCtx) => StatefulBuilder(
+            builder: (sheetCtx, refresh) {
+              // `refresh` redessine la feuille, `setState` la carte derrière.
+              void act(VoidCallback change) {
+                _pushUndo();
+                setState(change);
+                refresh(() {});
+              }
+
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          _transformTile(
+                            Icons.align_horizontal_center,
+                            'Centrer\nhorizontal',
+                            () => act(() => l.x = _kCardW / 2),
+                          ),
+                          _transformTile(
+                            Icons.align_vertical_center,
+                            'Centrer\nvertical',
+                            () => act(() => l.y = _kCardH / 2),
+                          ),
+                          _transformTile(
+                            Icons.flip,
+                            'Miroir\nhorizontal',
+                            () => act(() => l.flipH = !l.flipH),
+                          ),
+                          _transformTile(
+                            Icons.flip,
+                            'Miroir\nvertical',
+                            () => act(() => l.flipV = !l.flipV),
+                            quarterTurns: 1,
+                          ),
+                          _transformTile(
+                            Icons.rotate_90_degrees_cw_rounded,
+                            'Pivoter\n90°',
+                            () => act(
+                              () =>
+                                  l.rotation =
+                                      ((l.rotation + 90 + 180) % 360) - 180,
+                            ),
+                          ),
+                          // _moveLayer gère déjà son propre _pushUndo et son
+                          // setState : pas de passage par `act`.
+                          _transformTile(
+                            Icons.flip_to_front_rounded,
+                            'Avancer\nd\'un plan',
+                            () => _moveLayer(1),
+                          ),
+                          _transformTile(
+                            Icons.flip_to_back_rounded,
+                            'Reculer\nd\'un plan',
+                            () => _moveLayer(-1),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+    );
+  }
+
+  Widget _transformTile(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    int quarterTurns = 0,
+  }) => SizedBox(
+    width: 96,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RotatedBox(
+              quarterTurns: quarterTurns,
+              child: Icon(icon, size: 22, color: const Color(0xFF9B7BE0)),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11.5,
+                height: 1.25,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Widget _pillButton(IconData icon, VoidCallback onTap, {Color? color}) {
     return InkWell(
       onTap: onTap,
@@ -1678,11 +1845,33 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   Widget _buildSelectionTools() {
     final l = _sel;
     if (l == null) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 10),
-        child: Text(
-          'Tape un élément de la carte pour le modifier',
-          style: TextStyle(color: Colors.white38, fontSize: 12),
+      // Rien de sélectionné. Sur une carte encore vide, un simple « tape un
+      // élément » ne dit pas QUOI faire en premier : on oriente vers la
+      // photo, qui est le vrai point de départ d'une carte.
+      final vierge = _bgLayer == null && !_layers.any(
+        (e) => e.type == LayerType.image || e.type == LayerType.sticker,
+      );
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 24),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              vierge ? Icons.add_a_photo_outlined : Icons.touch_app_outlined,
+              size: 15,
+              color: Colors.white38,
+            ),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                vierge
+                    ? 'Commence par ajouter une photo 👇'
+                    : 'Tape un élément de la carte pour le modifier',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -1691,7 +1880,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         const SizedBox(height: 8),
-        // Pilule d'actions rapides
+        // ── Actions de l'élément sélectionné ──────────────────────────────
+        // Onze icônes alignées, sans libellé, tenaient à peine sur l'écran
+        // et n'apprenaient rien : impossible de deviner « flip_to_front ».
+        // On garde ici les 4 gestes du quotidien, et les transformations
+        // partent dans une feuille où chacune porte son NOM.
         Container(
           decoration: BoxDecoration(
             color: const Color(0xFF16213E),
@@ -1702,20 +1895,17 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Centrage horizontal : viser le milieu au doigt est illusoire,
-              // un appui le fait au pixel près. La largeur réelle du texte
-              // n'étant pas connue ici, on centre son point d'ancrage — ce
-              // que l'aimantation propose déjà comme repère.
-              _pillButton(Icons.align_horizontal_center, () {
-                _pushUndo();
-                setState(() => l.x = _kCardW / 2);
-              }),
-              _pillButton(Icons.align_vertical_center, () {
-                _pushUndo();
-                setState(() => l.y = _kCardH / 2);
-              }),
-              // Verrou : une fois la photo cadrée, on la fige pour travailler
-              // les textes par-dessus sans la bouger par mégarde.
+              _pillLabelled(
+                Icons.tune_rounded,
+                'Ajuster',
+                () => _openTransformSheet(l),
+              ),
+              _pillDivider(),
+              if (l.type == LayerType.text && l.role != LayerRole.cardRarity)
+                _pillButton(Icons.edit, () => _editTextLayer(l)),
+              if (l.type == LayerType.sticker)
+                _pillButton(Icons.palette, () => _editStickerColor(l)),
+              if (l.isDeletable) _pillButton(Icons.copy, _duplicateSelected),
               _pillButton(Icons.lock_open_rounded, () {
                 _pushUndo();
                 setState(() {
@@ -1723,27 +1913,6 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   _selected = -1; // plus rien à manipuler
                 });
               }),
-              _pillButton(Icons.flip, () => setState(() => l.flipH = !l.flipH)),
-              RotatedBox(
-                quarterTurns: 1,
-                child: _pillButton(
-                  Icons.flip,
-                  () => setState(() => l.flipV = !l.flipV),
-                ),
-              ),
-              _pillButton(
-                Icons.rotate_90_degrees_cw,
-                () => setState(
-                  () => l.rotation = ((l.rotation + 90 + 180) % 360) - 180,
-                ),
-              ),
-              _pillButton(Icons.flip_to_front, () => _moveLayer(1)),
-              _pillButton(Icons.flip_to_back, () => _moveLayer(-1)),
-              if (l.type == LayerType.text && l.role != LayerRole.cardRarity)
-                _pillButton(Icons.edit, () => _editTextLayer(l)),
-              if (l.type == LayerType.sticker)
-                _pillButton(Icons.palette, () => _editStickerColor(l)),
-              if (l.isDeletable) _pillButton(Icons.copy, _duplicateSelected),
               if (l.isDeletable)
                 _pillButton(
                   Icons.delete,
