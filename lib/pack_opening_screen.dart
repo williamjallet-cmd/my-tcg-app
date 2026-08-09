@@ -216,11 +216,28 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
     });
   }
 
+  /// Trois secousses rapprochées, réservées à la légendaire.
+  /// Chaque étape vérifie `mounted` : quitter l'écran pendant la séquence ne
+  /// doit pas continuer à faire vibrer le téléphone.
+  Future<void> _legendaryRumble() async {
+    HapticFeedback.heavyImpact();
+    for (final delay in const [110, 90]) {
+      await Future.delayed(Duration(milliseconds: delay));
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+    }
+  }
+
   void _flip(int i) {
     if (_revealed[i]) return;
     final card = _cards[i];
     final rank = _rarityRank(card.rarity);
-    if (rank >= 2) {
+    if (card.rarity == Rarity.legendary) {
+      // Triple pulsation : une seule secousse ne distingue pas la légendaire
+      // d'une épique. C'est le rythme, plus que l'intensité, qui fait
+      // ressentir l'événement.
+      _legendaryRumble();
+    } else if (rank >= 2) {
       HapticFeedback.heavyImpact();
     } else {
       HapticFeedback.selectionClick();

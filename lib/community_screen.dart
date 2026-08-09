@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'arcade_theme.dart';
 import 'community_service.dart';
+import 'press_effect.dart';
 import 'star_rating.dart';
 
 class CommunityScreen extends StatefulWidget {
@@ -157,10 +158,13 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
                               itemCount: _items.length,
                               itemBuilder:
-                                  (_, i) => _CommunityCard(
-                                    item: _items[i],
-                                    onTap: () => _openPreview(_items[i]),
-                                    onJoin: () => _join(_items[i]),
+                                  (_, i) => FadeInItem(
+                                    index: i,
+                                    child: _CommunityCard(
+                                      item: _items[i],
+                                      onTap: () => _openPreview(_items[i]),
+                                      onJoin: () => _join(_items[i]),
+                                    ),
                                   ),
                             ),
                           ),
@@ -210,7 +214,8 @@ class _CommunityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final col = item.collection;
-    return GestureDetector(
+    return PressableScale(
+      pressedScale: 0.975,
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),

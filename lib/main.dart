@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
@@ -431,7 +432,13 @@ class _BottomNav extends StatelessWidget {
               final item = _items[i];
               return Expanded(
                 child: GestureDetector(
-                  onTap: () => onTap(i),
+                  onTap: () {
+                    // Rien a faire si l'onglet est deja actif : re-declencher
+                    // vibration et rebond donnerait un retour trompeur.
+                    if (sel) return;
+                    HapticFeedback.selectionClick();
+                    onTap(i);
+                  },
                   behavior: HitTestBehavior.opaque,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -474,10 +481,19 @@ class _BottomNav extends StatelessWidget {
                                   : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          sel ? item.$1 : item.$2,
-                          color: sel ? _gold : _creamFaint,
-                          size: 22,
+                        // Petit rebond a la selection : l'icone « saute »
+                        // brievement, ce qui rend le changement d'onglet
+                        // franchement plus satisfaisant qu'un simple
+                        // changement de couleur.
+                        child: AnimatedScale(
+                          scale: sel ? 1.12 : 1.0,
+                          duration: const Duration(milliseconds: 260),
+                          curve: Curves.easeOutBack,
+                          child: Icon(
+                            sel ? item.$1 : item.$2,
+                            color: sel ? _gold : _creamFaint,
+                            size: 22,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 3),
