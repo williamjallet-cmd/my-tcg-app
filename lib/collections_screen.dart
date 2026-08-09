@@ -912,6 +912,9 @@ class _EditCollectionSheetState extends State<_EditCollectionSheet> {
                       Image.network(
                         widget.collection.imageUrl!,
                         fit: BoxFit.cover,
+                        // Bandeau d'apercu de 110 px de haut : inutile de
+                        // decoder la couverture en pleine resolution.
+                        cacheWidth: 700,
                         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                       ),
                     Container(color: Colors.black.withValues(alpha: 0.3)),

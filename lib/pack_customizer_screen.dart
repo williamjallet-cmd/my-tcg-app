@@ -58,6 +58,9 @@ class _PackCustomizerScreenState extends State<PackCustomizerScreen> {
     );
     if (file == null) return;
     final bytes = await file.readAsBytes();
+    // Le selecteur d'images passe par une autre application : l'ecran peut
+    // avoir ete quitte entre-temps.
+    if (!mounted) return;
     setState(() => _imageBytes = bytes);
   }
 

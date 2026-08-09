@@ -959,6 +959,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       imageQuality: 80,
     );
     if (file == null) return;
+    // Meme raison : retour du selecteur d'images sur un ecran peut-etre
+    // deja quitte.
+    if (!mounted) return;
     setState(() => _uploading = true);
     try {
       final bytes = await file.readAsBytes();
@@ -1092,7 +1095,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
-    );
+      // Libere le controleur a la fermeture de la feuille.
+    ).whenComplete(ctrl.dispose);
   }
 
   // ✨ @pseudo UNIQUE : deux joueurs peuvent s'appeler « Will », mais leur
@@ -1217,7 +1221,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               );
             },
           ),
-    );
+      // Libere le controleur a la fermeture de la feuille.
+    ).whenComplete(ctrl.dispose);
   }
 
   @override
@@ -1597,6 +1602,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           av,
           key: ValueKey(av),
           fit: BoxFit.cover,
+          // Cercle de 90 px : sans cette borne, une photo de profil de
+          // plusieurs milliers de pixels etait decodee entierement.
+          cacheWidth: 220,
           errorBuilder: (_, __, ___) => _defaultAvatarInner(),
         ),
       );

@@ -10,7 +10,6 @@
 
 part of 'pack_opening_screen.dart';
 
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //   CÉRÉMONIE — SACHET FOIL QU'ON DÉCHIRE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -431,6 +430,8 @@ class _FoilFace extends StatelessWidget {
           width: d,
           height: d,
           fit: BoxFit.cover,
+          // Meme borne que la variante en memoire juste au-dessus.
+          cacheWidth: 140,
           errorBuilder: (_, __, ___) => _defaultEmblem(d),
         ),
       );
