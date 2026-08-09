@@ -378,12 +378,24 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080814),
+      // IndexedStack CONSERVE l'etat de chaque onglet (defilement, donnees
+      // chargees) mais ne peint que l'onglet actif : le changement etait donc
+      // instantane, sans la moindre transition.
+      // _TabReveal fait apparaitre en fondu montant l'onglet qui devient
+      // actif, sans rien demonter — remplacer l'IndexedStack par un
+      // AnimatedSwitcher aurait tout recharge a chaque aller-retour.
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          const CollectionsScreen(),
-          const FriendsScreen(),
-          ProfileScreen(key: ValueKey(_profileEpoch)),
+          _TabReveal(
+            active: _currentIndex == 0,
+            child: const CollectionsScreen(),
+          ),
+          _TabReveal(active: _currentIndex == 1, child: const FriendsScreen()),
+          _TabReveal(
+            active: _currentIndex == 2,
+            child: ProfileScreen(key: ValueKey(_profileEpoch)),
+          ),
         ],
       ),
       bottomNavigationBar: _BottomNav(
@@ -396,6 +408,29 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
   }
+}
+
+/// Fait apparaitre l'onglet qui devient actif : fondu + leger glissement
+/// vers le haut. L'onglet sortant, lui, cesse simplement d'etre peint par
+/// l'IndexedStack — un fondu croise aurait demande de peindre deux ecrans
+/// entiers en meme temps, pour un gain visuel nul a cette vitesse.
+class _TabReveal extends StatelessWidget {
+  final bool active;
+  final Widget child;
+  const _TabReveal({required this.active, required this.child});
+
+  @override
+  Widget build(BuildContext context) => AnimatedOpacity(
+    opacity: active ? 1 : 0,
+    duration: const Duration(milliseconds: 200),
+    curve: Curves.easeOut,
+    child: AnimatedSlide(
+      offset: active ? Offset.zero : const Offset(0, 0.012),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      child: child,
+    ),
+  );
 }
 
 class _BottomNav extends StatelessWidget {

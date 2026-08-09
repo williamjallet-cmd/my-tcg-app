@@ -969,6 +969,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                   ),
                   child: TabBar(
                     controller: _tabCtrl,
+                    // Retour tactile au changement d'onglet, comme la barre
+                    // de navigation du bas : l'app reagit partout pareil.
+                    onTap: (i) {
+                      if (i != _tabCtrl.index) HapticFeedback.selectionClick();
+                    },
                     labelColor: _cream,
                     unselectedLabelColor: _creamFaint,
                     labelStyle: _body(size: 14.5, weight: FontWeight.w800),
@@ -976,8 +981,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                       size: 14.5,
                       weight: FontWeight.w700,
                     ),
-                    indicatorColor: _gold,
-                    indicatorWeight: 3,
+                    // Indicateur arrondi et legerement lumineux plutot qu'un
+                    // trait carre : coherent avec les autres accents dores.
+                    indicator: UnderlineTabIndicator(
+                      borderSide: const BorderSide(color: _gold, width: 3),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
                     indicatorSize: TabBarIndicatorSize.label,
                     dividerColor: Colors.transparent,
                     tabs: [
