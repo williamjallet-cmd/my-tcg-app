@@ -308,7 +308,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       vsync: this,
     )..repeat();
 
-    // Couches spéciales toujours présentes : nom + rareté
+    _addSpecialLayers();
+  }
+
+  /// Couches spéciales toujours présentes : nom + rareté.
+  void _addSpecialLayers() {
     _layers.add(
       CardLayer(
         id: CardLayer.newId(),
@@ -334,6 +338,38 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
         fontSize: 11,
       ),
     );
+  }
+
+  /// Remet l'éditeur à neuf après un enregistrement réussi.
+  ///
+  /// 🐛 L'ancien éditeur de collection le faisait ; en le remplaçant, j'avais
+  /// perdu ce comportement. La carte restait affichée après sauvegarde, et
+  /// réappuyer sur « Sauvegarder » créait un DOUBLON (l'identifiant est
+  /// retiré de l'horloge à chaque appel).
+  void _resetEditor() {
+    setState(() {
+      _layers.clear();
+      _addSpecialLayers();
+      _templateLayerIds.clear();
+      _undoStack.clear();
+      _redoStack.clear();
+      _selected = -1;
+      _nameController.text = 'Ma Carte';
+      _rarity = Rarity.common;
+      _effect = CardEffect.none;
+      _backImageBytes = null;
+      _backColor = 0xFF16213E;
+      _frontColor = 0xFF1A1A2E;
+      _frameStyle = 0;
+      _showBack = false;
+      _openSection = 'Rareté';
+      _stats
+        ..hp = null
+        ..element = CardElement.neutre
+        ..weakness = null
+        ..attacks.clear()
+        ..flavorText = '';
+    });
   }
 
   @override
@@ -1842,6 +1878,20 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
     );
   }
 
+  /// Bascule recto / verso.
+  ///
+  /// 🐛 Les sections diffèrent d'une face à l'autre : en arrivant au verso
+  /// avec « Rareté » ouverte — section qui n'y existe pas — le panneau
+  /// n'affichait qu'un en-tête replié, donnant l'impression d'un écran vide.
+  /// On ouvre donc la première section de la face affichée.
+  void _switchFace(bool back) {
+    setState(() {
+      _showBack = back;
+      _selected = -1; // l'élément sélectionné n'est pas sur cette face
+      _openSection = back ? 'Couleur de fond' : 'Rareté';
+    });
+  }
+
   Widget _buildSelectionTools() {
     final l = _sel;
     if (l == null) {
@@ -2363,6 +2413,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
       _layers.add(layer);
     } else {
       _layers.insert(insertAt, layer);
+      // 🐛 Insérer décale tous les index suivants. Sans ce rattrapage,
+      // _selected continuait de désigner une POSITION et pointait donc sur
+      // une autre couche : saisir des PV pendant qu'un texte était
+      // sélectionné déplaçait ensuite le mauvais élément.
+      if (_selectedRaw >= insertAt) _selectedRaw++;
     }
   }
 
@@ -2713,6 +2768,11 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
   Widget _attackEditor(int i) {
     final a = _stats.attacks[i];
     return Container(
+      // 🐛 Clé liée à l'ATTAQUE, pas à sa position. Sans elle, Flutter
+      // réutilise l'état des champs par position : supprimer la 1ʳᵉ attaque
+      // laissait ses textes affichés dans l'éditeur de la 2ᵈᵉ, qui ne
+      // correspondaient plus à rien.
+      key: ObjectKey(a),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
@@ -3023,6 +3083,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
           duration: const Duration(seconds: 2),
         ),
       );
+      _resetEditor();
       widget.onSaved?.call();
     } catch (e) {
       reportError(
@@ -3110,7 +3171,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 GestureDetector(
-                  onTap: () => setState(() => _showBack = false),
+                  onTap: () => _switchFace(false),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
@@ -3137,7 +3198,7 @@ class _CardCreatorScreenState extends State<CardCreatorScreen>
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => setState(() => _showBack = true),
+                  onTap: () => _switchFace(true),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
