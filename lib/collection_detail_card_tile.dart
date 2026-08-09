@@ -86,27 +86,29 @@ class _CardTile extends StatelessWidget {
         ],
       );
     }
-    return GestureDetector(
+    // Retour tactile a l'appui : la vignette s'enfonce legerement avant
+    // d'ouvrir l'inspecteur 3D.
+    return PressableScale(
       onTap: () {
+        // growRoute : la carte semble s'agrandir depuis la grille.
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder:
-                (_) => CardInspectorScreen(
-                  frontCard: SavedCardFrontWidget(
-                    card: card,
-                    width: 300,
-                    height: 420,
-                    // ✨ SavedCard ne connaît pas le statut GOLD : il vient
-                    // de _goldIds, porté ici par la vignette.
-                    isGold: isGold,
-                  ),
-                  backCard: SavedCardBackWidget(
-                    card: card,
-                    width: 300,
-                    height: 420,
-                  ),
-                ),
+          growRoute(
+            CardInspectorScreen(
+              frontCard: SavedCardFrontWidget(
+                card: card,
+                width: 300,
+                height: 420,
+                // ✨ SavedCard ne connaît pas le statut GOLD : il vient
+                // de _goldIds, porté ici par la vignette.
+                isGold: isGold,
+              ),
+              backCard: SavedCardBackWidget(
+                card: card,
+                width: 300,
+                height: 420,
+              ),
+            ),
           ),
         );
       },

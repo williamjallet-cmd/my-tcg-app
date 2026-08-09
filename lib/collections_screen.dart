@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'collection_service.dart';
+import 'press_effect.dart';
 import 'pack_system.dart';
 import 'pack_countdown.dart';
 import 'collection_detail_screen.dart';
@@ -36,6 +37,7 @@ class _CollectionsScreenState extends State<CollectionsScreen>
   final _service = CollectionService.instance;
   List<CollectionModel> _collections = [];
   bool _loading = true;
+
   /// Distingue « pas de collection » de « chargement échoué » — voir
   /// _emptyState : afficher « Crée ta première collection » après une
   /// coupure réseau laisse croire que tout a disparu.
@@ -491,7 +493,11 @@ class _CollectionCardState extends State<_CollectionCard> {
   @override
   Widget build(BuildContext context) {
     final a = widget.accent;
-    return GestureDetector(
+    // Retour tactile : la vignette s'enfonce sous le doigt avant d'ouvrir
+    // la collection. Legerement moins marque que sur les cartes, l'element
+    // etant beaucoup plus grand.
+    return PressableScale(
+      pressedScale: 0.975,
       onTap: widget.onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),

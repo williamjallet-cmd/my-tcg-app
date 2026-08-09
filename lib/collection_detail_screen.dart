@@ -1,4 +1,4 @@
-﻿// collection_detail_screen.dart
+// collection_detail_screen.dart
 // ════════════════════════════════════════════════════════════════════════════
 //  RESKIN « RÉTRO-ARCADE PREMIUM » (réf. handoff Brokemon / Balatro)
 //  ⚠️ VISUEL UNIQUEMENT — toute la logique est conservée à l'identique :
@@ -35,6 +35,7 @@ import 'daily_reward_card.dart';
 import 'card_creator_screen.dart';
 import 'error_reporter.dart';
 import 'pack_countdown.dart';
+import 'press_effect.dart';
 import 'dev_tools.dart';
 
 // ✂️ Fichier decoupe : voir l'en-tete de chaque part.
@@ -671,7 +672,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
       if (serverIds.isEmpty && catIds.isNotEmpty) {
         reportError(
           'Catalogue vide alors que ${catIds.length} cartes sont en local — '
-          'purge annulée par sécurité',
+              'purge annulée par sécurité',
           'Réponse serveur vide inattendue',
         );
       } else {
@@ -1746,13 +1747,16 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
         final c = cards[i];
         final revealed = obtIds.contains(c.id);
         return RepaintBoundary(
-          child: _CardTile(
-            card: c,
-            revealed: revealed,
-            copies: _qtyByCard[c.id] ?? 1,
-            isNew: revealed && !_seenIds.contains(c.id),
-            isGold: _goldIds.contains(c.id),
-            onFuse: revealed ? () => _confirmFuse(c) : null,
+          child: FadeInItem(
+            index: i,
+            child: _CardTile(
+              card: c,
+              revealed: revealed,
+              copies: _qtyByCard[c.id] ?? 1,
+              isNew: revealed && !_seenIds.contains(c.id),
+              isGold: _goldIds.contains(c.id),
+              onFuse: revealed ? () => _confirmFuse(c) : null,
+            ),
           ),
         );
       },
@@ -2058,7 +2062,6 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
     );
   }
 }
-
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Helpers globaux — couleurs/labels de rareté (palette arcade)
