@@ -142,15 +142,57 @@ class AuthService {
         await _db.from('profiles').select('id').eq('id', userId).maybeSingle();
 
     if (existing == null) {
-      final base = email.split('@').first.replaceAll(RegExp(r'[^a-z0-9]'), '');
-      final username =
-          '${base}_${DateTime.now().millisecondsSinceEpoch % 9999}';
       await _createProfile(
         userId: userId,
-        username: username,
+        username: await _freeUsernameFor(email),
         displayName: displayName,
         avatarUrl: avatarUrl,
       );
     }
+  }
+
+  /// Fabrique un @pseudo LIBRE à partir de l'adresse e-mail.
+  ///
+  /// 🐛 Deux défauts corrigés ici :
+  ///   1. `replaceAll(RegExp(r'[^a-z0-9]'), '')` s'appliquait sans passer en
+  ///      minuscules : les majuscules étaient SUPPRIMÉES au lieu d'être
+  ///      converties. « William.Jallet@… » donnait « illiamallet ».
+  ///   2. Le suffixe ne prenait que 9 999 valeurs et n'était jamais vérifié.
+  ///      Depuis la contrainte d'unicité sur `username`, une collision fait
+  ///      échouer toute l'inscription sur une erreur Postgres brute.
+  Future<String> _freeUsernameFor(String email) async {
+    var base = email
+        .split('@')
+        .first
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (base.isEmpty) base = 'joueur'; // adresse sans caractère latin
+    if (base.length > 14) base = base.substring(0, 14);
+
+    // On tente le pseudo nu, puis des variantes numérotées. La vérification
+    // évite l'échec ; le hasard final évite une boucle infinie si plusieurs
+    // inscriptions se croisent.
+    final candidates = <String>[
+      base,
+      for (var i = 2; i <= 6; i++) '$base$i',
+      '${base}_${DateTime.now().millisecondsSinceEpoch % 100000}',
+    ];
+
+    for (final c in candidates) {
+      try {
+        final taken =
+            await _db
+                .from('profiles')
+                .select('id')
+                .eq('username', c)
+                .maybeSingle();
+        if (taken == null) return c;
+      } catch (_) {
+        // Vérification impossible (réseau) : on tente ce candidat plutôt que
+        // de bloquer l'inscription. Au pire, l'insertion échouera clairement.
+        return c;
+      }
+    }
+    return candidates.last;
   }
 }

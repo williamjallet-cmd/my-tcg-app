@@ -517,6 +517,29 @@ class CollectionService {
   /// `return []` en cas d'erreur, une simple coupure réseau faisait croire
   /// que le catalogue était vide → TOUTES les cartes locales étaient
   /// effacées. Un échec doit rester un échec, pas devenir « zéro carte ».
+  /// Nombre de cartes RÉELLES du catalogue, compté côté serveur.
+  ///
+  /// « Réelle » = l'entrée porte un `card_data`, donc la carte peut être
+  /// reconstruite et affichée. Les entrées sans données (catalogues importés
+  /// par d'anciens scripts) n'affichent rien et ne doivent pas être comptées.
+  ///
+  /// ⚠️ Ne dépend PAS du stockage local : la vignette d'accueil affichait
+  /// « 0 / 0 » tant que la collection n'avait pas été ouverte au moins une
+  /// fois sur l'appareil, puisque les cartes n'y étaient pas encore
+  /// téléchargées.
+  Future<int> getCatalogueRealCount(String collectionId) async {
+    try {
+      return await _db
+          .from('collection_cards')
+          .count(CountOption.exact)
+          .eq('collection_id', collectionId)
+          .not('card_data', 'is', null);
+    } catch (e) {
+      reportError('Comptage du catalogue', e);
+      return 0;
+    }
+  }
+
   Future<List<String>> getCollectionCardIds(String collectionId) async {
     final res = await _db
         .from('collection_cards')

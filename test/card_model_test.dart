@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tcg_app/card_layer.dart';
 import 'package:tcg_app/card_model.dart';
 import 'package:tcg_app/card_storage.dart';
+import 'package:tcg_app/profile_service.dart';
 
 void main() {
   group('CardStats — rétro-compatibilité', () {
@@ -191,6 +192,31 @@ void main() {
       expect(c.id, isNot(l.id));
       expect(c.x, l.x + 12);
       expect(c.role, LayerRole.normal);
+    });
+  });
+
+  group('@pseudo — normalisation et validation', () {
+    test('les majuscules sont converties, pas supprimées', () {
+      // Le bug historique de la generation automatique : un regex [^a-z0-9]
+      // applique avant le passage en minuscules mangeait les majuscules.
+      expect(ProfileService.normalizeUsername('William'), 'william');
+      expect(ProfileService.normalizeUsername('  @Willzer '), 'willzer');
+    });
+
+    test('les espaces deviennent des underscores', () {
+      expect(ProfileService.normalizeUsername('will zer'), 'will_zer');
+    });
+
+    test('le format invalide est refusé avec un message', () {
+      expect(ProfileService.validateUsername('ab'), isNotNull); // trop court
+      expect(ProfileService.validateUsername('a' * 21), isNotNull); // trop long
+      expect(ProfileService.validateUsername('will!'), isNotNull); // caractère
+      expect(ProfileService.validateUsername(''), isNotNull);
+    });
+
+    test('un pseudo correct est accepté', () {
+      expect(ProfileService.validateUsername('willzer'), isNull);
+      expect(ProfileService.validateUsername('@Will_2'), isNull);
     });
   });
 }

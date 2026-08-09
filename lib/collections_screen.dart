@@ -5,7 +5,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'card_storage.dart';
 import 'collection_service.dart';
 import 'pack_system.dart';
 import 'pack_countdown.dart';
@@ -457,23 +456,21 @@ class _CollectionCardState extends State<_CollectionCard> {
         widget.collection.id,
       ),
       CollectionService.instance.getMyOwnedCardIds(widget.collection.id),
-      CardStorage.loadCards(),
+      CollectionService.instance.getCatalogueRealCount(widget.collection.id),
     ]);
 
     final c = results[0] as bool;
     final members = results[1] as int;
-    final cardIds = results[2] as List<String>;
+    final cardIds = (results[2] as List<String>).toSet();
     final ownedIds = (results[3] as List<String>).toSet();
-    final localCards = results[4] as List<SavedCard>;
 
-    // ✅ RÈGLE COMMUNE avec le DEX : seules les cartes RÉELLES comptent.
-    // Une entrée de catalogue orpheline (sans card_data, n'affichant aucune
-    // carte) ne gonfle plus le total — d'où le même chiffre sur les 2 écrans.
-    final catalogueIds = cardIds.toSet();
-    final realIds =
-        localCards.map((card) => card.id).where(catalogueIds.contains).toSet();
-    final total = realIds.length;
-    final obtained = ownedIds.where(realIds.contains).length;
+    // ✅ Total compté CÔTÉ SERVEUR : seules les entrées de catalogue portant
+    // un card_data sont des cartes réelles et affichables.
+    // 🐛 Avant, le total se déduisait du stockage local : tant qu'une
+    // collection n'avait pas été ouverte sur l'appareil, la vignette
+    // affichait « 0 / 0 » alors que le serveur avait les cartes.
+    final total = results[4] as int;
+    final obtained = ownedIds.where(cardIds.contains).length;
 
     if (mounted) {
       setState(() {
