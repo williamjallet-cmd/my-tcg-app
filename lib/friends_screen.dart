@@ -4,6 +4,7 @@
 //
 // Dépendance requise (pubspec.yaml) :
 //   google_fonts: ^6.2.1
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -1001,23 +1002,47 @@ class _SearchSheetState extends State<_SearchSheet> {
   bool _searching = false;
   final Set<String> _sent = {};
 
+  // 🐛 La recherche partait a CHAQUE caractere tape : 7 requetes reseau pour
+  // « willzer », et surtout une COURSE — une reponse ancienne pouvait
+  // arriver apres une recente et afficher les resultats d'une recherche
+  // deja perimee.
+  Timer? _debounce;
+
+  /// Numero de la derniere recherche lancee : toute reponse portant un
+  /// numero anterieur est ignoree.
+  int _searchSeq = 0;
+
   @override
   void dispose() {
+    _debounce?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
 
-  Future<void> _search(String q) async {
+  void _onQueryChanged(String q) {
+    _debounce?.cancel();
     if (q.trim().isEmpty) {
-      setState(() => _results = []);
+      setState(() {
+        _results = [];
+        _searching = false;
+      });
       return;
     }
     setState(() => _searching = true);
+    // On attend une courte pause dans la frappe avant d'interroger le
+    // serveur : une seule requete au lieu d'une par lettre.
+    _debounce = Timer(const Duration(milliseconds: 350), () => _search(q));
+  }
+
+  Future<void> _search(String q) async {
+    final seq = ++_searchSeq;
     try {
       final res = await ProfileService.instance.searchUsers(q);
-      if (mounted) setState(() => _results = res);
+      // Une recherche plus recente a ete lancee entre-temps : on jette.
+      if (!mounted || seq != _searchSeq) return;
+      setState(() => _results = res);
     } finally {
-      if (mounted) setState(() => _searching = false);
+      if (mounted && seq == _searchSeq) setState(() => _searching = false);
     }
   }
 
@@ -1087,7 +1112,7 @@ class _SearchSheetState extends State<_SearchSheet> {
             autofocus: true,
             style: _T.bodyText(15, w: FontWeight.w600),
             cursorColor: _T.gold,
-            onChanged: _search,
+            onChanged: _onQueryChanged,
             decoration: InputDecoration(
               hintText: 'Rechercher…',
               hintStyle: _T.bodyText(

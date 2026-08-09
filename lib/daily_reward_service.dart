@@ -14,6 +14,7 @@ import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'card_media_service.dart';
 import 'card_model.dart';
 import 'card_storage.dart';
 import 'collection_service.dart';
@@ -172,6 +173,32 @@ class DailyRewardService {
       // potentiellement incomplet — l'utilisateur doit le savoir.
       reportError('Chargement du catalogue pour la récompense', e);
     }
+
+    // 🐛 Le tirage ne portait que sur les cartes DÉJÀ présentes sur
+    // l'appareil. Sur un téléphone qui n'avait pas encore ouvert la
+    // collection (réinstallation, nouvel appareil, premier lancement), la
+    // liste était vide et la récompense annonçait « Ajoute des cartes à
+    // cette collection » alors que le serveur en avait des dizaines.
+    // On reconstruit donc ce qui manque avant de tirer.
+    final manquantes = ids.difference(all.map((c) => c.id).toSet()).toList();
+    if (manquantes.isNotEmpty) {
+      try {
+        final entrees = await CollectionService.instance
+            .getCollectionCardsData(collectionId, manquantes);
+        final rebaties =
+            entrees.map((e) => e.toSavedCard()).whereType<SavedCard>().toList();
+        if (rebaties.isNotEmpty) {
+          final hydratees = await CardMediaService.instance.hydrateAll(
+            rebaties,
+          );
+          await CardStorage.addCards(hydratees);
+          all.addAll(hydratees);
+        }
+      } catch (e) {
+        reportError('Téléchargement des cartes de la collection', e);
+      }
+    }
+
     return all.where((c) => ids.contains(c.id)).toList();
   }
 
