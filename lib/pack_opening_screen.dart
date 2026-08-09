@@ -237,6 +237,13 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
   }
 
   void _advance() {
+    // 🐛 L'overlay de suspense est un IgnorePointer : les appuis le
+    // TRAVERSENT et « SUIVANT » reste actif dessous. Un second appui
+    // pendant la pause programmait donc un deuxième incrément différé,
+    // _index dépassait la dernière carte, et `_cards[_index]` levait une
+    // erreur d'indice — écran rouge en pleine ouverture de pack.
+    if (_suspense) return;
+
     if (_index < _cards.length - 1) {
       final goingToLast = _index + 1 == _cards.length - 1;
       // Avant la dernière carte : petite pause de tension (suspense),
@@ -250,7 +257,9 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
           if (!mounted) return;
           setState(() {
             _suspense = false;
-            _index++;
+            // Ceinture et bretelles : même si un incrément parasite passait,
+            // l'index ne peut plus sortir de la liste.
+            if (_index < _cards.length - 1) _index++;
           });
         });
       } else {
@@ -326,6 +335,28 @@ class _PackOpeningScreenState extends State<PackOpeningScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Garde-fou : un pack vide ferait planter tous les accès `_cards[...]`
+    // ci-dessous. Les deux appelants actuels vérifient déjà, mais une
+    // liste vide ne doit jamais produire un écran rouge.
+    if (_cards.isEmpty) {
+      return Scaffold(
+        backgroundColor: _Pal.bgDeep,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Aucune carte à révéler', style: _arcade(size: 18)),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Retour', style: _arcade(size: 15)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final revealColor =
         _stage == _Stage.reveal
             ? _rarityColor(_cards[_index].rarity)
