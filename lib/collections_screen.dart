@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'collection_service.dart';
 import 'press_effect.dart';
+import 'skeleton.dart';
 import 'pack_system.dart';
 import 'pack_countdown.dart';
 import 'collection_detail_screen.dart';
@@ -288,11 +289,10 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                 ],
               ),
               if (_loading)
-                const SliverFillRemaining(
-                  child: Center(
-                    child: CircularProgressIndicator(color: Arcade.gold),
-                  ),
-                )
+                // Silhouettes plutot qu'une roue : la page occupe deja la
+                // bonne place, donc rien ne « saute » a l'arrivee des
+                // vraies vignettes.
+                const SliverToBoxAdapter(child: CollectionListSkeleton())
               else if (_collections.isEmpty)
                 SliverFillRemaining(child: _emptyState())
               else

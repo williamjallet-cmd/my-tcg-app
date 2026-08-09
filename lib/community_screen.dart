@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'arcade_theme.dart';
 import 'community_service.dart';
 import 'press_effect.dart';
+import 'skeleton.dart';
 import 'star_rating.dart';
 
 class CommunityScreen extends StatefulWidget {
@@ -143,11 +144,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 Expanded(
                   child:
                       _loading
-                          ? const Center(
-                            child: CircularProgressIndicator(
-                              color: Arcade.gold,
-                            ),
-                          )
+                          // Meme traitement que l'accueil : la liste se
+                          // dessine deja a sa place definitive.
+                          ? const CollectionListSkeleton(count: 4)
                           : _items.isEmpty
                           ? _emptyState()
                           : RefreshIndicator(

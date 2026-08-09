@@ -36,6 +36,7 @@ import 'card_creator_screen.dart';
 import 'error_reporter.dart';
 import 'pack_countdown.dart';
 import 'press_effect.dart';
+import 'skeleton.dart';
 import 'dev_tools.dart';
 
 // ✂️ Fichier decoupe : voir l'en-tete de chaque part.
@@ -1004,9 +1005,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen>
                 Expanded(
                   child:
                       _loading
-                          ? const Center(
-                            child: CircularProgressIndicator(color: _gold),
-                          )
+                          // Grille de silhouettes aux memes proportions que
+                          // les vraies cartes.
+                          ? const CardGridSkeleton()
                           : TabBarView(
                             controller: _tabCtrl,
                             // FIX : bloque le scroll gauche/droite en mode déplacement
